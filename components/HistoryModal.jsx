@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { historyManager } from '../lib/history-manager.js';
 import { CHART_TYPES } from '../lib/constants.js';
 import ConfirmDialog from './ConfirmDialog';
+import { X as XIcon, Trash2, RotateCcw, HardDrive, Clock as ClockIcon } from 'lucide-react';
 
 export default function HistoryModal({ isOpen, onClose, onApply }) {
   const [histories, setHistories] = useState([]);
@@ -20,9 +21,14 @@ export default function HistoryModal({ isOpen, onClose, onApply }) {
     }
   }, [isOpen]);
 
-  const loadHistories = () => {
-    const allHistories = historyManager.getHistories();
-    setHistories(allHistories);
+  const loadHistories = async () => {
+    try {
+      const allHistories = await historyManager.getHistories();
+      setHistories(allHistories);
+    } catch (e) {
+      console.error('Failed to load histories', e);
+      setHistories([]);
+    }
   };
 
   const handleApply = (history) => {
@@ -35,9 +41,9 @@ export default function HistoryModal({ isOpen, onClose, onApply }) {
       isOpen: true,
       title: '确认删除',
       message: '确定要删除这条历史记录吗？',
-      onConfirm: () => {
-        historyManager.deleteHistory(id);
-        loadHistories();
+      onConfirm: async () => {
+        await historyManager.deleteHistory(id);
+        await loadHistories();
       }
     });
   };
@@ -47,9 +53,9 @@ export default function HistoryModal({ isOpen, onClose, onApply }) {
       isOpen: true,
       title: '确认清空',
       message: '确定要清空所有历史记录吗？此操作不可恢复。',
-      onConfirm: () => {
-        historyManager.clearAll();
-        loadHistories();
+      onConfirm: async () => {
+        await historyManager.clearAll();
+        await loadHistories();
       }
     });
   };
@@ -66,28 +72,35 @@ export default function HistoryModal({ isOpen, onClose, onApply }) {
 
       <div className="relative bg-white rounded border border-gray-300 w-full max-w-4xl mx-4 max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">历史记录</h2>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2">
+            <ClockIcon className="w-5 h-5 text-gray-700" />
+            <h2 className="text-lg font-semibold text-gray-900">历史记录</h2>
+          </div>
+          <div className="flex items-center gap-2">
+            {histories.length > 0 && (
+              <button
+                onClick={handleClearAll}
+                className="p-2 rounded text-red-600 hover:bg-red-50 transition-colors duration-200"
+                title="清空全部"
+              >
+                <Trash2 className="w-5 h-5" />
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors duration-200"
+              title="关闭"
+            >
+              <XIcon className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
-          {histories.length > 0 && (
-            <div className="mb-4">
-              <button
-                onClick={handleClearAll}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors duration-200"
-              >
-                清空全部
-              </button>
-            </div>
-          )}
+          <div className="mb-3 text-xs text-gray-600 flex items-center gap-2">
+            <HardDrive className="w-4 h-4 text-gray-500" />
+            <span>所有历史记录都存放在本地</span>
+          </div>
 
           <div className="space-y-3">
             {histories.length === 0 ? (
@@ -119,18 +132,22 @@ export default function HistoryModal({ isOpen, onClose, onApply }) {
                         </div>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
+                    <div className="flex items-center gap-1.5 ml-4">
                       <button
                         onClick={() => handleApply(history)}
-                        className="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-200"
+                        className="p-2 rounded text-blue-600 hover:text-blue-700 hover:bg-blue-50 transition-colors duration-200"
+                        title="应用"
+                        aria-label="应用"
                       >
-                        应用
+                        <RotateCcw className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => handleDelete(history.id)}
-                        className="px-3 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors duration-200"
+                        className="p-2 rounded text-red-600 hover:text-red-700 hover:bg-red-50 transition-colors duration-200"
+                        title="删除"
+                        aria-label="删除"
                       >
-                        删除
+                        <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>

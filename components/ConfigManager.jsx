@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Plus, Download, Upload, CheckCircle2, Activity, Pencil, Copy, Trash } from 'lucide-react';
 import { configManager } from '../lib/config-manager.js';
 import Notification from './Notification';
 import ConfirmDialog from './ConfirmDialog';
@@ -9,7 +10,6 @@ export default function ConfigManager({ isOpen, onClose, onConfigSelect }) {
   const [configs, setConfigs] = useState([]);
   const [activeConfigId, setActiveConfigId] = useState(null);
   const [editingConfig, setEditingConfig] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -207,9 +207,7 @@ export default function ConfigManager({ isOpen, onClose, onConfigSelect }) {
     input.click();
   };
 
-  const filteredConfigs = searchQuery
-    ? configManager.searchConfigs(searchQuery)
-    : configs;
+  // No search: directly use configs list
 
   if (!isOpen) return null;
 
@@ -256,51 +254,47 @@ export default function ConfigManager({ isOpen, onClose, onConfigSelect }) {
             </div>
           )}
 
-          <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded">
-            <p className="text-sm text-blue-800">提示：如果启用了访问密码，将优先使用服务器端配置，此处配置将被忽略</p>
-          </div>
-
-          {/* Actions Bar */}
-          <div className="mb-6 flex flex-wrap gap-2">
-            <button
-              onClick={handleCreateNew}
-              className="px-4 py-2 bg-gray-900 text-white rounded hover:bg-gray-800 transition-colors duration-200"
-            >
-              新建配置
-            </button>
-            <button
-              onClick={handleExport}
-              className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200"
-            >
-              导出配置
-            </button>
-            <button
-              onClick={handleImport}
-              className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 transition-colors duration-200"
-            >
-              导入配置
-            </button>
-          </div>
-
-          {/* Search */}
-          <div className="mb-4">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索配置..."
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
+          {/* Tip + Actions in one row */}
+          <div className="mb-6 flex items-center justify-between gap-3">
+            <p className="text-xs text-gray-500 leading-5">
+              提示：若启用访问密码，将优先使用服务器端配置。
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCreateNew}
+                title="新建配置"
+                aria-label="新建配置"
+                className="inline-flex items-center justify-center w-9 h-9 rounded border border-gray-300 bg-white hover:bg-gray-50"
+              >
+                <Plus className="w-4 h-4 text-gray-700" />
+              </button>
+              <button
+                onClick={handleExport}
+                title="导出配置"
+                aria-label="导出配置"
+                className="inline-flex items-center justify-center w-9 h-9 rounded border border-gray-300 bg-white hover:bg-gray-50"
+              >
+                <Download className="w-4 h-4 text-gray-700" />
+              </button>
+              <button
+                onClick={handleImport}
+                title="导入配置"
+                aria-label="导入配置"
+                className="inline-flex items-center justify-center w-9 h-9 rounded border border-gray-300 bg-white hover:bg-gray-50"
+              >
+                <Upload className="w-4 h-4 text-gray-700" />
+              </button>
+            </div>
           </div>
 
           {/* Config List */}
           <div className="space-y-3">
-            {filteredConfigs.length === 0 ? (
+            {configs.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
-                {searchQuery ? '没有找到匹配的配置' : '暂无配置，点击"新建配置"创建第一个配置'}
+                暂无配置，点击“新建配置”创建第一个配置
               </div>
             ) : (
-              filteredConfigs.map((config) => (
+              configs.map((config) => (
                 <div
                   key={config.id}
                   className={`border rounded-lg p-4 ${
@@ -329,40 +323,50 @@ export default function ConfigManager({ isOpen, onClose, onConfigSelect }) {
                         <div>创建时间: {new Date(config.createdAt).toLocaleString()}</div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 ml-4">
+                    <div className="flex items-center gap-1.5 ml-4">
                       {config.id !== activeConfigId && (
                         <button
                           onClick={() => handleSetActive(config.id)}
-                          className="px-3 py-1 text-xs bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors duration-200"
+                          title="设为当前"
+                          aria-label="设为当前"
+                          className="inline-flex items-center justify-center w-8 h-8 rounded border border-gray-300 bg-white hover:bg-gray-50"
                         >
-                          设为当前
+                          <CheckCircle2 className="w-4 h-4 text-blue-600" />
                         </button>
                       )}
                       <button
                         onClick={() => handleTestConnection(config)}
                         disabled={isLoading}
-                        className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600 transition-colors duration-200 disabled:bg-gray-400"
+                        title="测试连接"
+                        aria-label="测试连接"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded border border-gray-300 bg-white hover:bg-gray-50 disabled:opacity-50"
                       >
-                        测试
+                        <Activity className="w-4 h-4 text-green-600" />
                       </button>
                       <button
                         onClick={() => handleEdit(config)}
-                        className="px-3 py-1 text-xs bg-gray-500 text-white rounded hover:bg-gray-600 transition-colors duration-200"
+                        title="编辑"
+                        aria-label="编辑"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded border border-gray-300 bg-white hover:bg-gray-50"
                       >
-                        编辑
+                        <Pencil className="w-4 h-4 text-gray-700" />
                       </button>
                       <button
                         onClick={() => handleClone(config)}
-                        className="px-3 py-1 text-xs bg-purple-500 text-white rounded hover:bg-purple-600 transition-colors duration-200"
+                        title="克隆"
+                        aria-label="克隆"
+                        className="inline-flex items-center justify-center w-8 h-8 rounded border border-gray-300 bg-white hover:bg-gray-50"
                       >
-                        克隆
+                        <Copy className="w-4 h-4 text-purple-600" />
                       </button>
                       {configs.length > 1 && (
                         <button
                           onClick={() => handleDelete(config.id)}
-                          className="px-3 py-1 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors duration-200"
+                          title="删除"
+                          aria-label="删除"
+                          className="inline-flex items-center justify-center w-8 h-8 rounded border border-gray-300 bg-white hover:bg-gray-50"
                         >
-                          删除
+                          <Trash className="w-4 h-4 text-red-600" />
                         </button>
                       )}
                     </div>

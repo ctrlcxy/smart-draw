@@ -1,0 +1,103 @@
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
+                title="上传图片"
+                onClick={onImageUpload}
+              >
+                <ImageIcon className="w-4 h-4" />
+              </Button>
+              <button
+                onClick={() => setShowTypeMenu((v) => !v)}
+                className="h-8 px-2 text-xs rounded-md hover:bg-gray-100 text-gray-700"
+                title="选择图表类型"
+              >
+                {currentTypeLabel}
+              </button>
+            </div>
+            <div>
+              <Button
+                onClick={handleSend}
+                disabled={!input.trim() || isGenerating}
+                size="icon"
+                className="h-8 w-8 rounded-md bg-primary text-primary-foreground shadow"
+                title="发送"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+          {showTypeMenu && (
+            <div className="absolute left-2 bottom-14 w-44 rounded-xl bg-white border border-gray-200 shadow-lg p-1 text-sm z-10">
+              {chartTypeOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => { setChartType(opt.value); setShowTypeMenu(false); }}
+                  className={cn(
+                    'w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50',
+                    chartType === opt.value ? 'bg-gray-50' : ''
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+    <style jsx global>{`
+      .no-scrollbar::-webkit-scrollbar { width: 0; height: 0; }
+      .no-scrollbar::-webkit-scrollbar-thumb { background: transparent; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    `}</style>
+    </>
+  );
+}
+
+function XmlBubble({ xmlText }) {
+  const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(xmlText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1200);
+    } catch (e) {
+      console.error('Copy failed', e);
+    }
+  };
+
+  return (
+    <div className="max-w-[80%] w-[80%] min-w-0 rounded-3xl rounded-bl-md overflow-hidden border border-blue-200 bg-blue-50/70 text-gray-900 shadow-sm">
+      <div
+        className="flex items-center justify-between px-3 py-2 bg-blue-100/60 border-b border-blue-200/70 cursor-pointer"
+        onClick={() => setExpanded(v => !v)}
+        title={expanded ? '收起' : '展开'}
+      >
+        <div className="flex items-center gap-2 text-[12px] font-medium text-blue-800">
+          <Code2 className="w-3.5 h-3.5 opacity-80" />
+          <span>XML</span>
+        </div>
+      </div>
+      {expanded && (
+        <div className="relative w-full min-w-0">
+          <button
+            onClick={copyToClipboard}
+            className="absolute right-2 top-2 z-10 px-2 h-7 text-[12px] rounded-md text-blue-800/90 hover:bg-blue-200/60 flex items-center gap-1"
+            title="复制 XML"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copied ? '已复制' : '复制'}</span>
+          </button>
+          <pre
+            className={cn(
+              'font-mono text-[12px] leading-6 px-3 py-3 pt-10 whitespace-pre-wrap break-words break-all text-gray-800 max-h-[70vh] overflow-auto w-full max-w-full min-w-0'
+            )}
+          >{xmlText}</pre>
+        </div>
+      )}
+    </div>
+  );
+}

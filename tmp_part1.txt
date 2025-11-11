@@ -1,0 +1,200 @@
+'use client';
+
+import { useState, useEffect, useRef } from 'react';
+import { WandSparkles, Send, Plus, Image as ImageIcon, Bot, MessageSquarePlus, Minimize2, Copy, Check, Code2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Card } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+
+export default function FloatingChat({
+  onSendMessage,
+  isGenerating,
+  messages = [],
+  onFileUpload,
+  onImageUpload,
+  onNewChat,
+}) {
+  const [isOpen, setIsOpen] = useState(true);
+  const [input, setInput] = useState('');
+  const [chartType, setChartType] = useState('auto');
+  const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const chartTypeOptions = [
+    { value: 'auto', label: '自动识别' },
+    { value: 'flowchart', label: '流程图' },
+    { value: 'mindmap', label: '思维导图' },
+    { value: 'orgchart', label: '组织架构图' },
+    { value: 'sequence', label: '时序图' },
+    { value: 'er', label: 'ER图' },
+    { value: 'network', label: '网络拓扑图' },
+  ];
+  const currentTypeLabel = chartTypeOptions.find(o => o.value === chartType)?.label || '自动识别';
+
+  const handleSend = () => {
+    if (!input.trim() || isGenerating) return;
+    onSendMessage(input, chartType);
+    setInput('');
+  };
+
+  // Auto-resize textarea
+  const textareaRef = useRef(null);
+  const adjustTextareaHeight = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${el.scrollHeight}px`;
+  };
+  useEffect(() => {
+    adjustTextareaHeight();
+  }, [input, isOpen]);
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  // Detect XML content or fenced XML blocks
+  const isXmlContent = (text = '') => {
+    if (typeof text !== 'string') return false;
+    const trimmed = text.trim();
+    if (/```xml[\s\S]*```/i.test(trimmed)) return true;
+    return /^(<\?xml|<mxfile|<diagram|<mxGraphModel|<graph)/i.test(trimmed);
+  };
+
+  const extractXml = (text = '') => {
+    if (typeof text !== 'string') return text;
+    const match = text.match(/```xml\s*([\s\S]*?)```/i);
+    if (match) return match[1].trim();
+    return text.trim();
+  };
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="fixed top-20 right-6 w-14 h-14 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-50"
+      >
+        <WandSparkles className="w-6 h-6" />
+      </button>
+    );
+  }
+
+  return (
+    <>
+    <Card className="fixed top-2 bottom-2 right-2 w-[420px] h-auto shadow-xl flex flex-col z-50 bg-white/90 supports-[backdrop-filter]:bg-white/80 backdrop-blur border border-gray-200/70 rounded-3xl">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 bg-transparent rounded-t-3xl">
+        <div className="flex items-center gap-2">
+          <div className="w-2 h-2 rounded-full bg-emerald-500" />
+          <h3 className="font-semibold text-sm text-gray-800">AI 对话</h3>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="ghost"
+            size="icon"
+            title="新建对话"
+            onClick={() => (onNewChat ? onNewChat() : window.dispatchEvent(new CustomEvent('new-chat')))}
+          >
+            <MessageSquarePlus className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="收起面板"
+            onClick={() => setIsOpen(false)}
+          >
+            <Minimize2 className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Messages Area */}
+      <ScrollArea className="flex-1 p-4">
+        <div className="space-y-4">
+          {messages.length === 0 ? (
+            <div className="text-center text-muted-foreground text-sm py-10">
+              开始对话，让 AI 帮你生成图表
+            </div>
+          ) : (
+            messages.map((msg, idx) => {
+              const isUser = msg.role === 'user'
+              const isSystem = msg.role === 'system'
+
+              if (isSystem) {
+                return (
+                  <div key={idx} className="flex items-start gap-2 text-[13px] text-gray-500">
+                    <Bot className="w-4 h-4 mt-1 opacity-70" />
+                    <div className="italic">System: {msg.content}</div>
+                  </div>
+                )
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className={cn(
+                    'flex items-end w-full min-w-0',
+                    isUser ? 'justify-end' : 'justify-start'
+                  )}
+                >
+                  {(!isUser && (msg.type === 'xml' || isXmlContent(msg.content))) ? (
+                    <XmlBubble xmlText={extractXml(msg.content)} />
+                  ) : (
+                    <div
+                      className={cn(
+                        'max-w-[80%] px-4 py-2 text-[13px] leading-6 rounded-3xl shadow-sm whitespace-pre-wrap break-words',
+                        isUser
+                          ? 'bg-gradient-to-br from-sky-500 to-blue-600 text-white rounded-br-md shadow-md'
+                          : 'bg-white text-gray-900 border border-gray-200 rounded-bl-md'
+                      )}
+                    >
+                      {msg.content}
+                    </div>
+                  )}
+                </div>
+              )
+            })
+          )}
+          {isGenerating && (
+            <div className="flex justify-start">
+              <div className="rounded-3xl px-4 py-2 text-sm bg-white border border-gray-200 shadow-sm">
+                <div className="flex space-x-2">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </ScrollArea>
+
+      {/* Input Area */}
+      <div className="p-4 space-y-3 bg-transparent rounded-b-3xl">
+        {/* Input Box */}
+        <div className="relative">
+          <Textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="描述你想要的图表..."
+            rows={1}
+            className="min-h-[84px] max-h-[40vh] pr-14 pb-12 resize-none overflow-auto no-scrollbar rounded-2xl bg-white border-gray-200"
+            disabled={isGenerating}
+          />
+          {/* Bottom inline toolbar as overlay, visually merged with textarea */}
+          <div className="absolute left-0 right-0 bottom-0 flex items-center justify-between bg-white rounded-b-2xl px-2 py-2  border-gray-200">
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
+                title="上传文件"
+                onClick={onFileUpload}
+              >
+                <Plus className="w-4 h-4" />
+              </Button>

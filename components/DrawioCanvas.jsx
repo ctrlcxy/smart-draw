@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle, memo } from 'react';
 import { getEmbedUrl } from './drawio/utils/getEmbedUrl';
 import { handleEvent } from './drawio/utils/handleEvent';
 import { useActions } from './drawio/hooks/useActions';
@@ -13,7 +13,7 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
     onLoad,
     onClose,
     onExport,
-    autosave = true,
+    autosave = false,
     baseUrl,
     urlParameters,
     configuration,
@@ -39,7 +39,7 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
       mergeDiagram: (xmlData) => action.merge({ xml: xmlData }),
       getXml: action.getXml
     }),
-    [action]
+    [action.exportDiagram, action.merge, action.getXml]
   );
 
   // Handle messages from Draw.io iframe
@@ -110,7 +110,7 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
       },
       baseUrl
     );
-  }, [action, configuration, exportFormat, onSave, onLoad, onClose, onExport, onError, baseUrl]);
+  }, [action.configure, action.exportDiagram, onSave, onLoad, onClose, onExport, onError, baseUrl, configuration, exportFormat]);
 
   // Set up message listener
   useEffect(() => {
@@ -120,17 +120,17 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
     };
   }, [messageHandler]);
 
-  // Load diagram when initialized
+  // Load diagram only when initialized and XML changes (avoid reloads on unrelated re-renders)
+  const loadFn = action.load;
   useEffect(() => {
-    if (isInitialized) {
-      const loadObject = {
-        xml: xml || '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>',
-        autosave: autosave
-      };
-
-      action.load(loadObject);
-    }
-  }, [isInitialized, xml, autosave, action]);
+    if (!isInitialized) return;
+    const loadObject = {
+      xml: xml || '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/></root></mxGraphModel>',
+      autosave: autosave
+    };
+    loadFn(loadObject);
+    // Only re-run when xml or autosave changes, or after initial init
+  }, [isInitialized, xml, autosave, loadFn]);
 
   return (
     <div className="w-full h-full relative">
@@ -161,4 +161,5 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
   );
 });
 
-export default DrawioCanvas;
+// Memoize to prevent rerenders when props are unchanged
+export default memo(DrawioCanvas);

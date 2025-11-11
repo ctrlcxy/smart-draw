@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(npm install -D tailwindcss-animate class-variance-authority clsx tailwind-merge)",
+      "Bash(npm cache clean:*)",
+      "Bash(pnpm install class-variance-authority clsx tailwind-merge lucide-react)",
+      "Bash(pnpm install @radix-ui/react-scroll-area @radix-ui/react-dialog)"
     ],
     "deny": [],
     "ask": []

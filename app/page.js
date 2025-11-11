@@ -1,16 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import dynamic from 'next/dynamic';
-import Chat from '@/components/Chat';
-import CodeEditor from '@/components/CodeEditor';
+import FloatingChat from '@/components/FloatingChat';
 import ConfigManager from '@/components/ConfigManager';
 import ContactModal from '@/components/ContactModal';
 import HistoryModal from '@/components/HistoryModal';
-import AccessPasswordModal from '@/components/AccessPasswordModal';
+import CombinedSettingsModal from '@/components/CombinedSettingsModal';
 import Notification from '@/components/Notification';
 import { getConfig, isConfigValid } from '@/lib/config';
 import { historyManager } from '@/lib/history-manager';
+import { getBlob } from '@/lib/indexeddb';
 
 // Dynamically import DrawioCanvas to avoid SSR issues
 const DrawioCanvas = dynamic(() => import('@/components/DrawioCanvas'), {
@@ -22,18 +22,14 @@ export default function Home() {
   const [isConfigManagerOpen, setIsConfigManagerOpen] = useState(false);
   const [isContactModalOpen, setIsContactModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-  const [isAccessPasswordModalOpen, setIsAccessPasswordModalOpen] = useState(false);
-  const [generatedCode, setGeneratedCode] = useState('');
+  const [isCombinedSettingsOpen, setIsCombinedSettingsOpen] = useState(false);
   const [diagramXml, setDiagramXml] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isApplyingCode, setIsApplyingCode] = useState(false);
-  const [leftPanelWidth, setLeftPanelWidth] = useState(25); // Percentage of viewport width
-  const [isResizingHorizontal, setIsResizingHorizontal] = useState(false);
-  const [apiError, setApiError] = useState(null);
-  const [xmlError, setXmlError] = useState(null);
-  const [currentInput, setCurrentInput] = useState('');
-  const [currentChartType, setCurrentChartType] = useState('auto');
   const [usePassword, setUsePassword] = useState(false);
+  const [messages, setMessages] = useState([]);
+  // Conversation id to group continuous dialogue within the same chat
+  const newConversationId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const [conversationId, setConversationId] = useState(newConversationId());
   const [notification, setNotification] = useState({
     isOpen: false,
     title: '',
@@ -78,22 +74,68 @@ export default function Home() {
     };
   }, []);
 
-  // Post-process Draw.io XML code: remove markdown wrappers
+  // Post-process Draw.io XML code: robustly extract XML and clean artifacts
   const postProcessDrawioCode = (code) => {
     if (!code || typeof code !== 'string') return code;
 
-    let processed = code.trim();
+    let processed = code;
 
-    // Remove markdown code fence wrappers (```xml, or just ```)
-    processed = processed.replace(/^```(?:xml)?\s*\n?/i, '');
-    processed = processed.replace(/\n?```\s*$/, '');
+    // Remove BOM and zero-width characters that can break XML parsing
+    processed = processed.replace(/\ufeff/g, '').replace(/[\u200B-\u200D\u2060]/g, '');
+
+    // 1) Prefer extracting first fenced block anywhere in the text
+    // Try ```xml ... ``` first
+    const fencedXmlMatch = processed.match(/```\s*xml\s*([\s\S]*?)```/i);
+    if (fencedXmlMatch && fencedXmlMatch[1]) {
+      processed = fencedXmlMatch[1];
+    } else {
+      // Fallback: any fenced block
+      const fencedAnyMatch = processed.match(/```\s*([\s\S]*?)```/);
+      if (fencedAnyMatch && fencedAnyMatch[1]) {
+        processed = fencedAnyMatch[1];
+      }
+    }
+
+    processed = processed.trim();
+
+    // 2) If HTML-escaped XML is detected, decode minimal entities
+    if (!/[<][a-z!?]/i.test(processed) && /&lt;\s*[a-z!?]/i.test(processed)) {
+      processed = processed
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'");
+    }
+
+    // 3) If extra text remains before the first tag, trim to the first '<'
+    const firstLt = processed.indexOf('<');
+    if (firstLt > 0) {
+      processed = processed.slice(firstLt);
+    }
+
+    // Final trim
     processed = processed.trim();
 
     return processed;
   };
 
-  // Handle sending a message (single-turn)
-  const handleSendMessage = async (userMessage, chartType = 'auto') => {
+  // Handle sending a message (supports optional images)
+  const handleSendMessage = async (userMessage, chartType = 'auto', imageFiles = [], textFiles = [], displayText = null) => {
+    const fileToBase64 = (file) => new Promise((resolve, reject) => {
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result || '';
+          const base64 = typeof result === 'string' ? result.split(',')[1] : '';
+          resolve(base64 || '');
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      } catch (e) {
+        resolve('');
+      }
+    });
     const usePassword = typeof window !== 'undefined' && localStorage.getItem('smart-excalidraw-use-password') === 'true';
     const accessPassword = typeof window !== 'undefined' ? localStorage.getItem('smart-excalidraw-access-password') : '';
 
@@ -108,11 +150,30 @@ export default function Home() {
       return;
     }
 
-    setCurrentInput(userMessage);
-    setCurrentChartType(chartType);
+    // Prepare display data for chat bubble (typed text + file chips + image thumbnails)
+    const filesForDisplay = Array.isArray(textFiles) ? textFiles.map(f => ({
+      name: f?.name || 'file',
+      size: f?.size || 0,
+      type: f?.type || 'text/plain'
+    })) : [];
+    let encodedImages = [];
+    if (Array.isArray(imageFiles) && imageFiles.length > 0) {
+      encodedImages = await Promise.all(
+        imageFiles.map(async ({ file, type, name }) => ({
+          data: await fileToBase64(file),
+          mimeType: (file && file.type) || type || 'image/png',
+          name: (file && file.name) || name || 'image'
+        }))
+      );
+    }
+    const imagesForDisplay = encodedImages.map(({ data, mimeType, name }) => ({
+      url: `data:${mimeType};base64,${data}`,
+      name,
+      type: mimeType,
+    }));
+    const contentForDisplay = (displayText && typeof displayText === 'string') ? displayText : '';
+    setMessages(prev => [...prev, { role: 'user', content: contentForDisplay, files: filesForDisplay, images: imagesForDisplay }]);
     setIsGenerating(true);
-    setApiError(null); // Clear previous errors
-    setXmlError(null); // Clear previous XML errors
 
     try {
       const headers = { 'Content-Type': 'application/json' };
@@ -120,19 +181,50 @@ export default function Home() {
         headers['x-access-password'] = accessPassword;
       }
 
-      // Call generate API with streaming
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          config: usePassword ? null : config,
-          userInput: userMessage,
+      // Prepare user payload with optional images
+      let userPayload = userMessage;
+      if (encodedImages.length > 0) {
+        userPayload = { text: userMessage, images: encodedImages };
+      }
+
+    // Prepare conversation history for server (exclude large XML from assistant)
+    const historyForServer = (() => {
+      const HISTORY_LIMIT = 3;
+      try {
+        const trimmed = messages.slice(-HISTORY_LIMIT); // limit history size
+        return trimmed
+          .filter(m => m && (m.role === 'user' || m.role === 'assistant'))
+          .map(m => ({
+            role: m.role,
+            content: (m.type === 'xml')
+              ? '[之前生成的 Draw.io XML 省略，已应用到画布]'
+              : (typeof m.content === 'string' ? m.content : '')
+          }))
+          .filter(m => m.content && typeof m.content === 'string');
+      } catch {
+        return [];
+      }
+    })();
+
+    // If there is an existing diagram, attach it as context to enable follow-ups
+    const contextXml = (diagramXml && typeof diagramXml === 'string' && diagramXml.trim()) ? diagramXml : null;
+
+    // Call generate API with streaming
+    const response = await fetch('/api/generate', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        config: usePassword ? null : config,
+          userInput: (encodedImages.length > 0)
+            ? { ...userPayload, contextXml }
+            : (contextXml ? { text: userPayload, contextXml } : userPayload),
           chartType,
-        }),
-      });
+          conversationId,
+          history: historyForServer,
+      }),
+    });
 
       if (!response.ok) {
-        // Parse error response body if available
         let errorMessage = '生成代码失败';
         try {
           const errorData = await response.json();
@@ -140,7 +232,6 @@ export default function Home() {
             errorMessage = errorData.error;
           }
         } catch (e) {
-          // If response body is not JSON, use status-based messages
           switch (response.status) {
             case 400:
               errorMessage = '请求参数错误，请检查输入内容';
@@ -186,16 +277,12 @@ export default function Home() {
               const data = JSON.parse(line.slice(6));
               if (data.content) {
                 accumulatedCode += data.content;
-                // Post-process and set the cleaned code to editor
-                const processedCode = postProcessDrawioCode(accumulatedCode);
-                setGeneratedCode(processedCode);
               } else if (data.error) {
                 throw new Error(data.error);
               }
             } catch (e) {
-              // SSE parsing errors - show to user
               if (e.message && !e.message.includes('Unexpected')) {
-                setApiError('数据流解析错误：' + e.message);
+                throw new Error('数据流解析错误：' + e.message);
               }
               console.error('Failed to parse SSE:', e);
             }
@@ -203,99 +290,74 @@ export default function Home() {
         }
       }
 
-      // Try to parse and apply the generated code (already post-processed)
+      // Process and apply the generated code
       const processedCode = postProcessDrawioCode(accumulatedCode);
-      tryParseAndApply(processedCode);
 
-      // Save to history (only for text input)
-      if (userMessage && processedCode) {
-        historyManager.addHistory({
-          chartType,
-          userInput: userMessage,
-          generatedCode: processedCode,
-          config: {
-            name: config?.name || config?.type||'',
-            model: config?.model||''
-          }
-        });
+      if (processedCode) {
+        // Validate XML cautiously, but avoid false negatives on valid Draw.io XML
+        const isLikelyDrawioXml = /<(mxfile|mxGraphModel|diagram)([\s>])/i.test(processedCode);
+
+        let isValid = false;
+        try {
+          const parser = new DOMParser();
+          // Try parsing as XML
+          const xmlDoc = parser.parseFromString(processedCode, 'application/xml');
+          const hasParserErrorTag = xmlDoc.getElementsByTagName('parsererror').length > 0 ||
+            (xmlDoc.documentElement && xmlDoc.documentElement.nodeName === 'parsererror');
+
+          isValid = !hasParserErrorTag;
+        } catch (e) {
+          isValid = false;
+        }
+
+        // Fallback: if it looks like Draw.io XML, accept even if parser complains
+        if (isValid || isLikelyDrawioXml) {
+          setDiagramXml(processedCode);
+          // Push XML to chat with special type for styling
+          setMessages(prev => [...prev, { role: 'assistant', content: processedCode, type: 'xml' }]);
+
+          // Save to history (IndexedDB, with conversation + attachments)
+          await historyManager.addHistory({
+            conversationId,
+            chartType,
+            userInput: contentForDisplay || (typeof userMessage === 'string' ? userMessage : ''),
+            generatedCode: processedCode,
+            images: imageFiles,
+            files: textFiles,
+            config: {
+              name: config?.name || config?.type || '',
+              model: config?.model || ''
+            }
+          });
+        } else {
+          throw new Error('XML 解析错误');
+        }
       }
     } catch (error) {
       console.error('Error generating code:', error);
-      // Check if it's a network error
-      if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
-        setApiError('网络连接失败，请检查网络连接');
-      } else {
-        setApiError(error.message);
-      }
+      setMessages(prev => [...prev, { role: 'assistant', content: `错误: ${error.message}` }]);
+      setNotification({
+        isOpen: true,
+        title: '生成失败',
+        message: error.message,
+        type: 'error'
+      });
     } finally {
       setIsGenerating(false);
     }
   };
 
-  // Try to parse and apply code to canvas
-  const tryParseAndApply = (code) => {
-    try {
-      // Clear previous XML errors
-      setXmlError(null);
-
-      // Code is already post-processed
-      const cleanedCode = code.trim();
-
-      if (!cleanedCode) {
-        setXmlError('代码为空');
-        return;
-      }
-
-      // Basic XML validation - check if it looks like valid XML
-      if (!cleanedCode.startsWith('<')) {
-        setXmlError('代码不是有效的 XML 格式');
-        return;
-      }
-
-      // Try to parse XML to validate it
-      const parser = new DOMParser();
-      const xmlDoc = parser.parseFromString(cleanedCode, 'text/xml');
-
-      // Check for parsing errors
-      const parseError = xmlDoc.querySelector('parsererror');
-      if (parseError) {
-        setXmlError('XML 解析错误：' + parseError.textContent);
-        return;
-      }
-
-      // Set the XML to be displayed in Draw.io
-      setDiagramXml(cleanedCode);
-      setXmlError(null); // Clear error on success
-    } catch (error) {
-      console.error('Failed to parse generated code:', error);
-      setXmlError('解析失败：' + error.message);
-    }
-  };
-
-  // Handle applying code from editor
-  const handleApplyCode = async () => {
-    setIsApplyingCode(true);
-    try {
-      // Simulate async operation for better UX
-      await new Promise(resolve => setTimeout(resolve, 300));
-      tryParseAndApply(generatedCode);
-    } catch (error) {
-      console.error('Error applying code:', error);
-    } finally {
-      setIsApplyingCode(false);
-    }
-  };
-
-  // Handle clearing code
-  const handleClearCode = () => {
-    setGeneratedCode('');
-    setDiagramXml('');
-  };
-
-  // Handle saving diagram from Draw.io
-  const handleSaveDiagram = (xml) => {
-    setGeneratedCode(xml);
+  // Handle saving diagram from Draw.io (stable reference to help memoization)
+  const handleSaveDiagram = useCallback((xml) => {
     setDiagramXml(xml);
+  }, []);
+
+  // Start a fresh chat
+  const handleNewChat = () => {
+    setMessages([]);
+    setConversationId(newConversationId());
+    // Clear canvas by resetting Draw.io XML
+    setDiagramXml('');
   };
 
   // Handle config selection from manager
@@ -306,147 +368,183 @@ export default function Home() {
   };
 
   // Handle applying history
-  const handleApplyHistory = (history) => {
-    setCurrentInput(history.userInput);
-    setCurrentChartType(history.chartType);
-    setGeneratedCode(history.generatedCode);
-    tryParseAndApply(history.generatedCode);
-  };
+  const handleApplyHistory = async (history) => {
+    try {
+      setConversationId(history.id);
+      // Load entire conversation to support continuous chat context
+      const msgs = await historyManager.getConversationMessages(history.id);
 
-  // Handle horizontal resizing (left panel vs right panel)
-  const handleHorizontalMouseDown = (e) => {
-    setIsResizingHorizontal(true);
-    e.preventDefault();
-  };
+      // Rehydrate attachments (images/files) from IndexedDB blobs for display
+      const normalized = await Promise.all((msgs || []).map(async (m) => {
+        const base = { role: m.role, content: m.content, type: m.type };
 
-  useEffect(() => {
-    const handleMouseMove = (e) => {
-      if (!isResizingHorizontal) return;
-      
-      const percentage = (e.clientX / window.innerWidth) * 100;
-      
-      // 可调节的范围
-      setLeftPanelWidth(Math.min(Math.max(percentage, 20), 80));
-    };
+        // 1) Primary path: attachments saved in IndexedDB
+        const atts = Array.isArray(m.attachments) ? m.attachments : [];
+        if (atts.length > 0) {
+          const images = [];
+          const files = [];
+          for (const att of atts) {
+            try {
+              const rec = att?.blobId ? await getBlob(att.blobId) : null;
+              const name = att?.name || rec?.name || 'file';
+              const type = att?.type || rec?.type || 'application/octet-stream';
+              const size = att?.size || rec?.size || 0;
+              if (type.startsWith('image/') || att?.kind === 'image') {
+                if (rec?.blob) {
+                  const url = URL.createObjectURL(rec.blob);
+                  images.push({ url, name, type });
+                }
+              } else {
+                files.push({ name, type, size });
+              }
+            } catch {
+              // ignore attachment rehydration failures per-item
+            }
+          }
 
-    const handleMouseUp = () => {
-      setIsResizingHorizontal(false);
-    };
+          if (images.length > 0 || files.length > 0) {
+            // When attachments exist, ensure we don't echo file contents.
+            // Keep only the typed text before any file markers.
+            let typedOnly = base.content;
+            try {
+              if (typeof base.content === 'string') {
+                const idx = base.content.search(/^#\s*(?:来自文件|From file)\s*:/m);
+                if (idx > -1) typedOnly = base.content.slice(0, idx).trim();
+              }
+            } catch {}
+            return { ...base, content: typedOnly, images, files };
+          }
+        }
 
-    if (isResizingHorizontal) {
-      document.addEventListener('mousemove', handleMouseMove);
-      document.addEventListener('mouseup', handleMouseUp);
+        // 2) Back-compatibility and file-upload fallback:
+        // If no attachments are stored, try to infer display from legacy fields
+        // or from the combined text format produced when sending files.
+        if (m.role === 'user') {
+          const images = Array.isArray(m.images) ? m.images.map(im => ({ url: im.url, name: im.name, type: im.type })) : [];
+          let files = Array.isArray(m.files) ? m.files.map(f => ({ name: f.name, type: f.type || 'text/plain', size: f.size || 0 })) : [];
+
+          // Parse combined text for file markers like "# 来自文件: filename"
+          // and extract typed text (before the first marker)
+          if ((images.length === 0 && files.length === 0) && typeof m.content === 'string' && m.content.includes('# 来自文件')) {
+            try {
+              const nameMatches = [...m.content.matchAll(/^#\s*来自文件:\s*(.+)$/gm)] || [];
+              if (nameMatches.length > 0) {
+                files = nameMatches.map(match => ({ name: (match[1] || 'file').trim(), type: 'text/plain', size: 0 }));
+                const firstMarker = m.content.search(/^#\s*来自文件:/m);
+                const typed = firstMarker > -1 ? m.content.slice(0, firstMarker).trim() : (m.content || '').trim();
+                return { ...base, content: typed, files };
+              }
+            } catch {}
+          }
+
+          if (images.length > 0 || files.length > 0) {
+            return { ...base, images, files };
+          }
+        }
+
+        // Default: return base when nothing to augment
+        return base;
+      }));
+
+      const lastXml = [...normalized].reverse().find(m => m.role === 'assistant' && m.type === 'xml');
+      if (lastXml?.content) setDiagramXml(lastXml.content);
+      setMessages(normalized);
+    } catch (e) {
+      // Fallback to old behavior if anything fails: strip file contents and keep filenames as chips
+      try {
+        const raw = typeof history.userInput === 'string' ? history.userInput : '';
+        const firstMarker = raw.search(/^#\s*(?:来自文件|From file)\s*:/m);
+        const typed = firstMarker > -1 ? raw.slice(0, firstMarker).trim() : raw;
+        const nameMatches = [...raw.matchAll(/^#\s*(?:来自文件|From file)\s*:\s*(.+)$/gm)] || [];
+        const files = nameMatches.map(m => ({ name: (m[1] || 'file').trim(), type: 'text/plain', size: 0 }));
+
+        setDiagramXml(history.generatedCode);
+        setMessages([
+          { role: 'user', content: typed, files },
+          { role: 'assistant', content: history.generatedCode, type: 'xml' }
+        ]);
+      } catch {
+        setDiagramXml(history.generatedCode);
+        setMessages([
+          { role: 'user', content: history.userInput },
+          { role: 'assistant', content: history.generatedCode, type: 'xml' }
+        ]);
+      }
     }
+  };
 
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+  // Handle file upload
+  const handleFileUpload = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.md,.txt';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const text = await file.text();
+        handleSendMessage(text, 'auto');
+      }
     };
-  }, [isResizingHorizontal]);
+    input.click();
+  };
+
+  // Handle image upload
+  const handleImageUpload = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        // TODO: Implement image upload logic
+        setNotification({
+          isOpen: true,
+          title: '功能开发中',
+          message: '图片上传功能即将推出',
+          type: 'info'
+        });
+      }
+    };
+    input.click();
+  };
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}
-      <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-gray-200">
-        <div>
-          <h1 className="text-lg font-semibold text-gray-900">Smart Draw.io</h1>
-          <p className="text-xs text-gray-500">AI 驱动的图表生成</p>
+      <header className="flex items-center justify-between px-2 py-2 bg-white border-b border-gray-200 z-10">
+        <div className="flex items-center">
+          <img src="/logo.png" alt="Logo" className="h-12 w-auto" />
         </div>
-        <div className="flex items-center space-x-3">
+        {/* <div className="flex items-center space-x-3">
           {(usePassword || (config && isConfigValid(config))) && (
             <div className="flex items-center space-x-2 px-3 py-1.5 bg-green-50 rounded border border-green-300">
               <div className="w-2 h-2 bg-green-500 rounded-full"></div>
               <span className="text-xs text-green-900 font-medium">
-                {usePassword ? '密码访问' : `${config.name || config.type} - ${config.model}`}
+                {usePassword ? '密码访问' : `${config?.name || config?.type} - ${config?.model}`}
               </span>
             </div>
           )}
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setIsHistoryModalOpen(true)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors duration-200"
-            >
-              历史记录
-            </button>
-            <button
-              onClick={() => setIsAccessPasswordModalOpen(true)}
-              className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors duration-200"
-            >
-              访问密码
-            </button>
-            <button
-              onClick={() => setIsConfigManagerOpen(true)}
-              className="px-4 py-2 text-sm font-medium text-white bg-gray-900 border border-gray-900 rounded hover:bg-gray-800 transition-colors duration-200"
-            >
-              管理配置
-            </button>
-          </div>
-        </div>
+        </div> */}
       </header>
 
-      {/* Main Content - Two Column Layout */}
-      <div className="flex flex-1 overflow-hidden pb-1">
-        {/* Left Panel - Chat and Code Editor */}
-        <div id="left-panel" style={{ width: `${leftPanelWidth}%` }} className="flex flex-col border-r border-gray-200 bg-white">
-          {/* API Error Banner */}
-          {apiError && (
-            <div className="bg-red-50 border-b border-red-200 px-4 py-3 flex items-start justify-between">
-              <div className="flex items-start space-x-2 min-w-0 flex-1">
-                <svg className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-red-800">请求失败</p>
-                  <p className="text-xs text-red-700 mt-1 break-words">{apiError}</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setApiError(null)}
-                className="text-red-600 hover:text-red-800 transition-colors"
-              >
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </button>
-            </div>
-          )}
-
-          {/* Input Section */}
-          <div style={{ height: '50%' }} className="overflow-auto">
-            <Chat
-              onSendMessage={handleSendMessage}
-              isGenerating={isGenerating}
-              initialInput={currentInput}
-              initialChartType={currentChartType}
-            />
-          </div>
-
-          {/* Code Editor Section */}
-          <div style={{ height: '50%' }} className="overflow-hidden">
-            <CodeEditor
-              code={generatedCode}
-              onChange={setGeneratedCode}
-              onApply={handleApplyCode}
-              onClear={handleClearCode}
-              xmlError={xmlError}
-              onClearXmlError={() => setXmlError(null)}
-              isGenerating={isGenerating}
-              isApplyingCode={isApplyingCode}
-            />
-          </div>
-        </div>
-
-        {/* Horizontal Resizer */}
-        <div
-          onMouseDown={handleHorizontalMouseDown}
-          className="w-1 bg-gray-200 hover:bg-gray-400 cursor-col-resize transition-colors duration-200 flex-shrink-0"
-        />
-
-        {/* Right Panel - Draw.io Canvas */}
-        <div style={{ width: `${100 - leftPanelWidth}%` }} className="bg-gray-50">
-          <DrawioCanvas xml={diagramXml} onSave={handleSaveDiagram} />
-        </div>
+      {/* Main Content - Full Screen DrawioCanvas */}
+      <div className="flex-1 overflow-hidden">
+        <DrawioCanvas xml={diagramXml} onSave={handleSaveDiagram} />
       </div>
+
+      {/* Floating Chat */}
+      <FloatingChat
+        onSendMessage={handleSendMessage}
+        isGenerating={isGenerating}
+        messages={messages}
+        onFileUpload={handleFileUpload}
+        onImageUpload={handleImageUpload}
+        onNewChat={handleNewChat}
+        onApplyXml={(xml) => setDiagramXml(xml)}
+        conversationId={conversationId}
+        onOpenHistory={() => setIsHistoryModalOpen(true)}
+        onOpenSettings={() => setIsCombinedSettingsOpen(true)}
+      />
 
       {/* Config Manager Modal */}
       <ConfigManager
@@ -455,40 +553,6 @@ export default function Home() {
         onConfigSelect={handleConfigSelect}
       />
 
-      {/* Footer */}
-      <footer className="bg-white border-t border-gray-200 px-6 py-3">
-        <div className="flex items-center justify-center space-x-4 text-sm text-gray-600">
-          <span>Smart Draw.io v0.1.0</span>
-          <span className="text-gray-400">|</span>
-          <span>AI 驱动的智能图表生成工具</span>
-          <span className="text-gray-400">|</span>
-          <a
-            href="https://github.com/liujuntao123/smart-drawio-next"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center space-x-1 hover:text-gray-900 transition-colors"
-          >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path fillRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" clipRule="evenodd" />
-            </svg>
-            <span>GitHub</span>
-          </a>
-          <span className="text-gray-400">|</span>
-          <button
-            onClick={() => setIsContactModalOpen(true)}
-            className="flex items-center space-x-1 hover:text-gray-900 transition-colors text-blue-600 hover:text-blue-700"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-            </svg>
-            <span>联系作者</span>
-          </button>
-          <button onClick={() => setIsContactModalOpen(true)} >
-          <span className="text-orange-500 font-medium">🎁 进群限时领取免费 claude-4.5-sonnet key</span>
-          </button>
-        </div>
-      </footer>
-
       {/* History Modal */}
       <HistoryModal
         isOpen={isHistoryModalOpen}
@@ -496,10 +560,13 @@ export default function Home() {
         onApply={handleApplyHistory}
       />
 
-      {/* Access Password Modal */}
-      <AccessPasswordModal
-        isOpen={isAccessPasswordModalOpen}
-        onClose={() => setIsAccessPasswordModalOpen(false)}
+      {/* Combined Settings Modal */}
+      <CombinedSettingsModal
+        isOpen={isCombinedSettingsOpen}
+        onClose={() => setIsCombinedSettingsOpen(false)}
+        usePassword={usePassword}
+        currentConfig={config}
+        onOpenConfigManager={() => setIsConfigManagerOpen(true)}
       />
 
       {/* Contact Modal */}

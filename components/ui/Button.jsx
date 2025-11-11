@@ -1,38 +1,59 @@
-import Spinner from './Spinner';
+import * as React from "react"
+import { cva } from "class-variance-authority"
+import { cn } from "@/lib/utils"
+import Spinner from './Spinner'
 
-export default function Button({
-  children,
-  variant = 'primary',
-  size = 'md',
+const buttonVariants = cva(
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50",
+  {
+    variants: {
+      variant: {
+        default: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+        primary: "bg-primary text-primary-foreground shadow hover:bg-primary/90",
+        destructive: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
+        danger: "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
+        outline: "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
+        secondary: "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
+        link: "text-primary underline-offset-4 hover:underline",
+      },
+      size: {
+        default: "h-9 px-4 py-2",
+        sm: "h-8 rounded-md px-3 text-xs",
+        md: "h-9 px-4 py-2",
+        lg: "h-10 rounded-md px-8",
+        icon: "h-9 w-9",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "default",
+    },
+  }
+)
+
+const Button = React.forwardRef(({
+  className,
+  variant,
+  size,
   loading = false,
-  disabled = false,
-  onClick,
-  type = 'button',
-  className = '',
-}) {
-  const baseClasses = 'rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:opacity-50 disabled:cursor-not-allowed';
-
-  const variants = {
-    primary: 'bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-300',
-    secondary: 'bg-gray-100 text-gray-900 hover:bg-gray-200 border border-gray-300',
-    danger: 'bg-red-600 text-white hover:bg-red-700',
-  };
-
-  const sizes = {
-    sm: 'px-3 py-1.5 text-sm',
-    md: 'px-4 py-2',
-    lg: 'px-6 py-3 text-lg',
-  };
-
+  children,
+  disabled,
+  ...props
+}, ref) => {
   return (
     <button
-      type={type}
-      onClick={onClick}
+      className={cn(buttonVariants({ variant, size, className }))}
+      ref={ref}
       disabled={disabled || loading}
-      className={`${baseClasses} ${variants[variant]} ${sizes[size]} ${className} flex items-center justify-center gap-2`}
+      {...props}
     >
       {loading && <Spinner size={size === 'sm' ? 'sm' : 'md'} />}
       {children}
     </button>
-  );
-}
+  )
+})
+Button.displayName = "Button"
+
+export default Button
+export { Button, buttonVariants }

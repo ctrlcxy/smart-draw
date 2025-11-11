@@ -124,24 +124,44 @@ export default function AccessPasswordModal({ isOpen, onClose }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="请输入访问密码"
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
+              disabled={!usePassword}
+              className={`w-full px-3 py-2 border rounded focus:outline-none focus:ring-2 focus:ring-gray-900 ${
+                usePassword ? 'border-gray-300 bg-white' : 'border-gray-200 bg-gray-50 text-gray-400'
+              }`}
             />
           </div>
 
-          {/* Enable Password & Validate */}
+          {/* Mode switch and Validate */}
           <div className="flex items-center justify-between">
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={usePassword}
-                onChange={(e) => setUsePassword(e.target.checked)}
-                className="mr-2"
-              />
-              <span className="text-sm text-gray-700">启用访问密码</span>
-            </label>
+            <div className="inline-flex items-center text-sm">
+              <div className="inline-flex rounded-md border border-gray-200 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setUsePassword(false)}
+                  className={`px-3 py-1.5 transition-colors duration-200 ${
+                    !usePassword
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  本地配置
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUsePassword(true)}
+                  className={`px-3 py-1.5 border-l border-gray-200 transition-colors duration-200 ${
+                    usePassword
+                      ? 'bg-gray-900 text-white'
+                      : 'bg-white text-gray-700 hover:bg-gray-50'
+                  }`}
+                >
+                  访问密码
+                </button>
+              </div>
+            </div>
             <button
               onClick={handleValidate}
-              disabled={isValidating}
+              disabled={isValidating || !usePassword}
               className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 disabled:bg-gray-50 disabled:text-gray-400 transition-colors duration-200 font-medium"
             >
               {isValidating ? '验证中...' : '验证密码'}

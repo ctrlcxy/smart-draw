@@ -8,7 +8,7 @@ import { SYSTEM_PROMPT, USER_PROMPT_TEMPLATE } from '@/lib/prompts';
  */
 export async function POST(request) {
   try {
-    const { config, userInput, chartType } = await request.json();
+    const { config, userInput, chartType, conversationId, history } = await request.json();
     const accessPassword = request.headers.get('x-access-password');
 
     // Check if using server-side config with access password
@@ -47,20 +47,27 @@ export async function POST(request) {
       );
     }
 
-    // Build messages array
+    // Build current user message (with optional multimodal and context XML)
     let userMessage;
 
     // Handle different input types
-    if (typeof userInput === 'object' && userInput.image) {
-      // Image input with text and image data
-      const { text, image } = userInput;
+    if (typeof userInput === 'object' && (userInput.image || userInput.images || userInput.text || userInput.contextXml)) {
+      // Image input and/or contextual input
+      const { text, image, images, contextXml } = userInput;
+      const imageArray = images || (image ? [image] : []);
+
+      // Build content with optional prior diagram context
+      const baseText = typeof text === 'string' ? text : (typeof userInput === 'string' ? userInput : '');
+      const withContext = (contextXml && typeof contextXml === 'string' && contextXml.trim())
+        ? `当前已有图表 XML 如下，请在此基础上进行修改：\n\n\u0060\u0060\u0060xml\n${contextXml}\n\u0060\u0060\u0060\n\n后续需求：\n${baseText || ''}`
+        : baseText;
+
       userMessage = {
         role: 'user',
-        content: USER_PROMPT_TEMPLATE(text, chartType),
-        image: {
-          data: image.data,
-          mimeType: image.mimeType
-        }
+        content: USER_PROMPT_TEMPLATE(withContext || '', chartType),
+        ...(imageArray && imageArray.length > 0 ? {
+          images: imageArray.map(img => ({ data: img.data, mimeType: img.mimeType }))
+        } : {})
       };
     } else {
       // Regular text input
@@ -70,8 +77,17 @@ export async function POST(request) {
       };
     }
 
+    // Normalize and include prior conversation history if provided
+    const HISTORY_LIMIT = 3;
+    const normalizedHistory = Array.isArray(history)
+      ? history
+          .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
+          .slice(-HISTORY_LIMIT)
+      : [];
+
     const fullMessages = [
       { role: 'system', content: SYSTEM_PROMPT },
+      ...normalizedHistory,
       userMessage
     ];
 

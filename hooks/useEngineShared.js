@@ -2,7 +2,8 @@
 
 import { useState, useCallback } from 'react';
 import { historyManager } from '@/lib/history-manager';
-import { getConfig, isConfigValid } from '@/lib/config';
+import { configService } from '@/lib/config-service';
+import { parseSSEStream, parseSSEStreamAlt } from '@/lib/sse-parser';
 
 /**
  * 共享的引擎逻辑 Hook
@@ -167,136 +168,15 @@ export function useEngineShared() {
   }, []);
 
   /**
-   * 处理 SSE 流式响应
-   * @param {Response} response - Fetch 响应对象
-   * @param {Function} onChunk - 每次接收到内容时的回调
-   * @returns {Promise<string>} 完整累积的内容
-   */
-  const processSSEStream = useCallback(async (response, onChunk) => {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let accumulatedCode = '';
-    let buffer = '';
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-
-      const events = buffer.split('\n\n');
-      buffer = events.pop() || '';
-
-      for (const evt of events) {
-        if (!evt.startsWith('data: ')) continue;
-        const jsonStr = evt.slice(6);
-        if (jsonStr === '[DONE]') continue;
-
-        try {
-          const data = JSON.parse(jsonStr);
-          if (data?.error) {
-            throw new Error(data.error);
-          }
-          if (typeof data?.content === 'string') {
-            accumulatedCode += data.content;
-            if (onChunk) onChunk(accumulatedCode);
-          }
-        } catch (e) {
-          console.error('SSE 解析错误:', e);
-          throw new Error(`流式响应解析失败: ${e.message}`);
-        }
-      }
-    }
-
-    return accumulatedCode;
-  }, []);
-
-  /**
-   * 处理 SSE 流式响应（备用解析方式，按行分割）
-   * @param {Response} response - Fetch 响应对象
-   * @param {Function} onChunk - 每次接收到内容时的回调
-   * @returns {Promise<string>} 完整累积的内容
-   */
-  const processSSEStreamAlt = useCallback(async (response, onChunk) => {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let accumulatedCode = '';
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        const t = line.trim();
-        if (!t || t === 'data: [DONE]') continue;
-        if (t.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(t.slice(6));
-            if (data.content) {
-              accumulatedCode += data.content;
-              if (onChunk) onChunk(accumulatedCode);
-            } else if (data.error) {
-              throw new Error(data.error);
-            }
-          } catch (e) {
-            console.error('SSE 解析错误:', e);
-            throw new Error(`流式响应解析失败: ${e.message}`);
-          }
-        }
-      }
-    }
-
-    return accumulatedCode;
-  }, []);
-
-  /**
-   * 新建对话：重置状态
-   */
-  const handleNewChat = useCallback(() => {
-    setMessages([]);
-    setUsedCode('');
-    setStreamingContent('');
-    setLastError(null);
-    setConversationId(newConversationId());
-  }, []);
-
-  /**
-   * 恢复历史对话基础逻辑
-   * @param {Object} history - 历史记录对象
-   * @param {Function} applyCodeFn - 应用代码的函数
-   */
-  const restoreHistoryBase = useCallback(
-    async (history, applyCodeFn) => {
-      try {
-        setConversationId(history.id);
-
-        const msgs = await historyManager.getConversationMessages(history.id);
-        setMessages(msgs || []);
-
-        if (applyCodeFn) {
-          await applyCodeFn(history.usedCode || '');
-        }
-      } catch (error) {
-        console.error('Restore history error:', error);
-      }
-    },
-    [],
-  );
-
-  /**
    * 验证 LLM 配置是否有效
    * @param {Function} showNotification - 通知函数
    * @returns {Object|null} 返回有效的配置对象，或 null
    */
   const validateConfig = useCallback((showNotification) => {
-    const activeConfig = getConfig();
-    if (!isConfigValid(activeConfig)) {
+    const activeConfig = configService.getCurrentConfig();
+    const validation = configService.validateConfig(activeConfig);
+
+    if (!validation.isValid) {
       if (showNotification) {
         showNotification({
           title: '配置缺失',
@@ -320,8 +200,7 @@ export function useEngineShared() {
     }
 
     try {
-      const usePassword =
-        localStorage.getItem('smart-diagram-use-password') === 'true';
+      const usePassword = configService.isPasswordMode();
       if (!usePassword) {
         return { ...baseConfig, apiKey: activeConfig.apiKey };
       }
@@ -333,6 +212,304 @@ export function useEngineShared() {
     // 访问密码模式：不在前端传播 apiKey
     return baseConfig;
   }, []);
+
+  /**
+   * 发送消息模板方法（策略模式）
+   * 统一处理两个引擎的消息发送流程，只有后处理逻辑不同
+   *
+   * @param {Object} params - 参数对象
+   * @param {string} params.input - 用户输入
+   * @param {Array} params.attachments - 附件数组
+   * @param {string} params.chartType - 图表类型
+   * @param {string} params.systemPrompt - 系统提示词
+   * @param {Function} params.userPromptTemplate - 用户提示词模板函数
+   * @param {Function} params.postProcessFn - 后处理函数（引擎特定）
+   * @param {Function} params.sseParserFn - SSE 解析函数（可选，默认标准解析）
+   * @param {string} params.editor - 引擎类型 ('drawio' | 'excalidraw')
+   * @param {Function} params.showNotification - 通知函数
+   */
+  const handleSendMessageTemplate = useCallback(
+    async ({
+      input,
+      attachments = [],
+      chartType = 'auto',
+      systemPrompt,
+      userPromptTemplate,
+      postProcessFn,
+      sseParserFn = parseSSEStream,
+      editor,
+      showNotification,
+    }) => {
+      const trimmed = (input || '').trim();
+      if (!trimmed && (!attachments || attachments.length === 0)) return;
+
+      try {
+        setIsGenerating(true);
+        setStreamingContent('');
+        setLastError(null);
+
+        // 1. 验证 LLM 配置
+        const llmConfig = validateConfig(showNotification);
+        if (!llmConfig) return;
+
+        // 2. 构造 System Message
+        const systemMessage = {
+          role: 'system',
+          content: systemPrompt,
+        };
+
+        // 3. 构造 User Message（应用模板）
+        const userContent = userPromptTemplate(trimmed, chartType);
+        const userMessage = await buildUserMessage(userContent, attachments);
+
+        // 4. 组装完整 messages（包含历史）
+        const fullMessages = buildFullMessages(systemMessage, userMessage, messages, 3);
+
+        // 追踪 user message
+        setMessages((prev) => [...prev, userMessage]);
+        await historyManager.addMessage(conversationId, userMessage, editor, llmConfig, chartType);
+
+        // 5. 调用后端流式接口
+        const response = await callLLMStream(llmConfig, fullMessages);
+
+        // 6. 处理 SSE 流
+        const accumulatedCode = await sseParserFn(response, {
+          onChunk: (content) => setStreamingContent(content),
+        });
+
+        // 7. 结束流式，清空 streamingContent
+        setStreamingContent('');
+
+        // 8. 后处理代码（引擎特定逻辑）
+        const finalCode = postProcessFn(accumulatedCode);
+
+        const assistantMessage = {
+          role: 'assistant',
+          content: finalCode,
+        };
+
+        setMessages((prev) => [...prev, assistantMessage]);
+        await historyManager.addMessage(conversationId, assistantMessage, editor, llmConfig, chartType);
+
+        // 返回最终代码（供引擎自动应用）
+        return finalCode;
+      } catch (error) {
+        console.error('Generate error:', error);
+        setStreamingContent('');
+
+        const errorMessage = error.message || '生成失败';
+        setLastError(errorMessage);
+
+        // Add error message to chat
+        const errorChatMessage = {
+          role: 'system',
+          content: `❌ 错误: ${errorMessage}`,
+        };
+        setMessages((prev) => [...prev, errorChatMessage]);
+
+        if (showNotification) {
+          showNotification({
+            title: '生成失败',
+            message: errorMessage,
+            type: 'error',
+          });
+        }
+
+        throw error;
+      } finally {
+        setIsGenerating(false);
+      }
+    },
+    [
+      conversationId,
+      messages,
+      buildUserMessage,
+      buildFullMessages,
+      callLLMStream,
+      validateConfig,
+      setIsGenerating,
+      setStreamingContent,
+      setMessages,
+      setLastError,
+    ]
+  );
+
+  /**
+   * 基于现有消息历史，针对某一条 AI 回复执行「重新生成」：
+   * - 截断当前 messages：保留目标消息之前的所有消息
+   * - 复用其前一条 user 消息作为本次请求输入
+   * - 使用相同 systemPrompt 和后处理逻辑重新调用 LLM
+   *
+   * @param {Object} params - 参数对象
+   * @param {number} params.targetIndex - 需要重试的目标消息在 messages 中的索引
+   * @param {string} params.systemPrompt - 系统提示词
+   * @param {Function} params.postProcessFn - 后处理函数（引擎特定）
+   * @param {Function} params.sseParserFn - SSE 解析函数（可选，默认标准解析）
+   * @param {string} params.editor - 引擎类型 ('drawio' | 'excalidraw')
+   * @param {Function} params.showNotification - 通知函数
+   */
+  const handleRetryMessageTemplate = useCallback(
+    async ({
+      targetIndex,
+      systemPrompt,
+      postProcessFn,
+      sseParserFn = parseSSEStream,
+      editor,
+      showNotification,
+    }) => {
+      if (typeof targetIndex !== 'number') return;
+
+      const currentMessages = messages || [];
+      if (targetIndex < 0 || targetIndex >= currentMessages.length) return;
+
+      const target = currentMessages[targetIndex];
+      if (!target) return;
+
+      // 寻找目标消息之前最近的一条 user 消息
+      let userIndex = -1;
+      for (let i = targetIndex - 1; i >= 0; i -= 1) {
+        const m = currentMessages[i];
+        if (m && m.role === 'user') {
+          userIndex = i;
+          break;
+        }
+      }
+      if (userIndex === -1) return;
+
+      const userMessage = currentMessages[userIndex];
+
+      // messages 截断到目标消息之前（包含 userMessage 本身）
+      const truncatedMessages = currentMessages.slice(0, targetIndex);
+
+      // 构造历史：仅使用 userMessage 之前的对话片段
+      const historyForBuild = currentMessages.slice(0, userIndex);
+
+      try {
+        setIsGenerating(true);
+        setStreamingContent('');
+        setLastError(null);
+
+        // 验证配置
+        const llmConfig = validateConfig(showNotification);
+        if (!llmConfig) return;
+
+        const systemMessage = {
+          role: 'system',
+          content: systemPrompt,
+        };
+
+        const fullMessages = buildFullMessages(
+          systemMessage,
+          userMessage,
+          historyForBuild,
+          3
+        );
+
+        // 先在前端截断消息列表，立即反映到 UI
+        setMessages(truncatedMessages);
+
+        const response = await callLLMStream(llmConfig, fullMessages);
+
+        const accumulatedCode = await sseParserFn(response, {
+          onChunk: (content) => setStreamingContent(content),
+        });
+
+        setStreamingContent('');
+
+        const finalCode = postProcessFn(accumulatedCode);
+
+        const assistantMessage = {
+          role: 'assistant',
+          content: finalCode,
+        };
+
+        const nextMessages = [...truncatedMessages, assistantMessage];
+        setMessages(nextMessages);
+        await historyManager.replaceConversation(
+          conversationId,
+          nextMessages,
+          editor,
+          llmConfig
+        );
+
+        return finalCode;
+      } catch (error) {
+        console.error('Generate (retry) error:', error);
+        setStreamingContent('');
+
+        const errorMessage = error.message || '生成失败';
+        setLastError(errorMessage);
+
+        const errorChatMessage = {
+          role: 'system',
+          content: `❌ 错误: ${errorMessage}`,
+        };
+        setMessages((prev) => [...prev, errorChatMessage]);
+
+        if (showNotification) {
+          showNotification({
+            title: '生成失败',
+            message: errorMessage,
+            type: 'error',
+          });
+        }
+
+        throw error;
+      } finally {
+        setIsGenerating(false);
+      }
+    },
+    [
+      messages,
+      conversationId,
+      buildFullMessages,
+      callLLMStream,
+      validateConfig,
+      setIsGenerating,
+      setStreamingContent,
+      setMessages,
+      setLastError,
+    ]
+  );
+
+  /**
+   * 新建对话：重置状态
+   */
+  const handleNewChat = useCallback(() => {
+    setMessages([]);
+    setUsedCode('');
+    setStreamingContent('');
+    setLastError(null);
+    setConversationId(newConversationId());
+  }, []);
+
+  /**
+   * 恢复历史对话基础逻辑
+   * @param {Object} history - 历史记录对象
+   * @param {Function} applyCodeFn - 应用代码的函数
+   */
+  const restoreHistoryBase = useCallback(
+    async (history, applyCodeFn) => {
+      try {
+        setConversationId(history.id);
+
+        const msgs = await historyManager.getConversationMessages(history.id);
+        const safeMsgs = Array.isArray(msgs) ? msgs : [];
+        setMessages(safeMsgs);
+
+        if (applyCodeFn) {
+          const lastAssistant = [...safeMsgs].reverse().find(
+            (m) => m && m.role === 'assistant' && typeof m.content === 'string',
+          );
+          const code = lastAssistant?.content || '';
+          await applyCodeFn(code);
+        }
+      } catch (error) {
+        console.error('Restore history error:', error);
+      }
+    },
+    []
+  );
 
   return {
     // 状态
@@ -354,12 +531,18 @@ export function useEngineShared() {
     buildUserMessage,
     buildFullMessages,
     callLLMStream,
-    processSSEStream,
-    processSSEStreamAlt,
     validateConfig,
+
+    // 模板方法（核心）
+    handleSendMessageTemplate,
+    handleRetryMessageTemplate,
 
     // 操作
     handleNewChat,
     restoreHistoryBase,
+
+    // SSE 解析器（导出供特殊需求使用）
+    parseSSEStream,
+    parseSSEStreamAlt,
   };
 }

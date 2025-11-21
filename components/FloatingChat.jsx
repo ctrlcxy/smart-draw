@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { WandSparkles, Send, Plus, Image as ImageIcon, Bot, MessageSquarePlus, Minimize2, Copy, Check, Code2, X as XIcon, FileText, CheckCircle2, ChevronDown, SquareMousePointer, Settings, Clock,MoveUp } from 'lucide-react';
+import { WandSparkles, Send, Plus, Image as ImageIcon, Bot, MessageSquarePlus, Minimize2, Copy, Check, Code2, X as XIcon, FileText, CheckCircle2, ChevronDown, SquareMousePointer, Settings, Clock, MoveUp, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/Button.jsx';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -68,6 +68,7 @@ export default function FloatingChat({
   conversationId,
   onOpenHistory,
   onOpenSettings,
+  onRetryMessage,
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const panelRef = useRef(null);
@@ -188,7 +189,7 @@ export default function FloatingChat({
         bottomRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
       }
     } catch {}
-  }, [messages, isGenerating, isOpen, shouldStickToBottom]);
+  }, [messages, isGenerating, isOpen, shouldStickToBottom, streamingContent]);
 
 
   // Reset input and selected attachments when conversation changes (new chat)
@@ -346,7 +347,7 @@ export default function FloatingChat({
     return (
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed top-36 right-6 w-14 h-14 bg-primary text-primary-foreground rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-50"
+        className="fixed top-36 right-6 w-14 h-14 bg-primary text-primary-foreground rounded-full shadow-xl shadow-primary/20 hover:shadow-2xl hover:scale-105 active:scale-95 transition-all flex items-center justify-center z-50"
       >
         <WandSparkles className="w-6 h-6" />
       </button>
@@ -355,20 +356,20 @@ export default function FloatingChat({
 
   return (
     <>
-    <Card ref={panelRef} className="fixed top-2 bottom-2 right-2 w-[420px] h-auto shadow-xl flex flex-col z-50 bg-white/90 supports-[backdrop-filter]:bg-white/80 backdrop-blur border border-gray-200/70 rounded-2xl">
+    <Card ref={panelRef} className="fixed top-4 bottom-4 right-4 w-[420px] md:w-[440px] h-auto shadow-2xl flex flex-col z-50 bg-white/95 supports-[backdrop-filter]:bg-white/85 backdrop-blur-xl border border-zinc-200 rounded-[24px] overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 bg-transparent rounded-t-3xl">
+      <div className="flex items-center justify-between px-5 py-3 bg-white/50 border-b border-zinc-100/50">
         {/* ✨ v6.0: 左侧 - 引擎切换下拉菜单 */}
-        <div className="relative flex items-center gap-2">
+        <div className="relative flex items-center">
           <button
             ref={engineMenuButtonRef}
             onClick={() => setShowEngineMenu(v => !v)}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-md text-sm font-medium text-gray-800 hover:bg-gray-100 transition-colors"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-50 border border-zinc-200 text-sm font-medium text-zinc-700 hover:bg-zinc-100 hover:border-zinc-300 transition-all group"
             title="切换绘图引擎"
           >
             <span>{currentEngineLabel}</span>
             <ChevronDown className={cn(
-              'w-3.5 h-3.5 text-gray-600 transition-transform',
+              'w-3.5 h-3.5 text-zinc-400 group-hover:text-zinc-600 transition-transform duration-200',
               showEngineMenu ? 'rotate-180' : 'rotate-0'
             )} />
           </button>
@@ -377,7 +378,7 @@ export default function FloatingChat({
           {showEngineMenu && (
             <div
               ref={engineMenuRef}
-              className="absolute left-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1"
+              className="absolute left-0 top-full mt-2 w-40 bg-white border border-zinc-100 rounded-xl shadow-xl shadow-zinc-200/50 z-50 p-1 animate-in fade-in zoom-in-95 duration-100"
             >
               {engineOptions.map((opt) => (
                 <button
@@ -387,8 +388,10 @@ export default function FloatingChat({
                     if (onEngineSwitch) onEngineSwitch(opt.value);
                   }}
                   className={cn(
-                    'w-full text-left px-3 py-2 text-sm hover:bg-gray-100 transition-colors',
-                    engineType === opt.value ? 'bg-gray-50 text-gray-900 font-medium' : 'text-gray-700'
+                    'w-full text-left px-3 py-2 text-sm rounded-lg transition-colors',
+                    engineType === opt.value 
+                      ? 'bg-zinc-100 text-zinc-900 font-medium' 
+                      : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900'
                   )}
                 >
                   {opt.label}
@@ -399,10 +402,11 @@ export default function FloatingChat({
         </div>
 
         {/* 右侧 - 操作按钮 */}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1">
           <Button
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg"
             title="配置"
             onClick={() => onOpenSettings && onOpenSettings()}
           >
@@ -411,6 +415,7 @@ export default function FloatingChat({
           <Button
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg"
             title="历史记录"
             onClick={() => onOpenHistory && onOpenHistory()}
           >
@@ -419,6 +424,7 @@ export default function FloatingChat({
           <Button
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg"
             title="新建对话"
             onClick={() => (onNewChat ? onNewChat() : window.dispatchEvent(new CustomEvent('new-chat')))}
           >
@@ -427,6 +433,7 @@ export default function FloatingChat({
           <Button
             variant="ghost"
             size="icon"
+            className="h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg"
             title="收起面板"
             onClick={() => setIsOpen(false)}
           >
@@ -436,30 +443,58 @@ export default function FloatingChat({
       </div>
 
       {/* Messages Area */}
-      <ScrollArea className="flex-1 p-4">
-        <div className="space-y-4">
+      <ScrollArea className="flex-1 px-5 py-2">
+        <div className="space-y-6 pb-4">
           {messages.length === 0 ? (
-            <div className="text-center text-muted-foreground text-sm py-10">
-              开始对话，其他的交给AI
+            <div className="flex flex-col items-center justify-center text-center text-zinc-400 text-sm py-20 gap-3">
+              <div className="w-12 h-12 bg-zinc-50 rounded-2xl flex items-center justify-center mb-2">
+                <WandSparkles className="w-6 h-6 text-zinc-300" />
+              </div>
+              <p>开始对话，其他的交给AI</p>
             </div>
           ) : (
             messages.map((msg, idx) => {
               const isUser = msg.role === 'user'
               const isSystem = msg.role === 'system'
+              const isAssistant = msg.role === 'assistant'
 
               if (isSystem) {
                 // Check if it's an error message
                 const isError = msg.content && msg.content.includes('❌');
                 return (
-                  <div key={idx} className={cn(
-                    "flex items-start gap-2 text-[13px]",
-                    isError ? "text-red-600" : "text-gray-500"
-                  )}>
-                    <Bot className="w-4 h-4 mt-1 opacity-70" />
-                    <div className={cn(
-                      "px-3 py-2 rounded-md",
-                      isError ? "bg-red-50 border border-red-200 text-red-700" : "italic"
-                    )}>{msg.content}</div>
+                  <div
+                    key={idx}
+                    className={cn(
+                      'flex w-full justify-center my-4 text-xs',
+                    )}
+                  >
+                    <div className="flex flex-col items-start gap-2">
+                      <div
+                        className={cn(
+                          'px-4 py-1.5 rounded-full flex items-center gap-2 border shadow-sm',
+                          isError
+                            ? 'bg-red-50 border-red-100 text-red-600'
+                            : 'bg-zinc-50 border-zinc-100 text-zinc-500'
+                        )}
+                      >
+                        {isError ? <XIcon className="w-3 h-3" /> : <Bot className="w-3 h-3" />}
+                        <span>{msg.content}</span>
+                      </div>
+                      {isError && onRetryMessage && (
+                        <button
+                          type="button"
+                          disabled={isGenerating}
+                          onClick={() => onRetryMessage(idx)}
+                          className={cn(
+                            'mt-1.5 ml-1 inline-flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-700 transition-colors px-2 py-1 rounded-md hover:bg-zinc-50',
+                            isGenerating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          )}
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>重新生成</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )
               }
@@ -468,88 +503,135 @@ export default function FloatingChat({
                 <div
                   key={idx}
                   className={cn(
-                    'flex items-end w-full min-w-0',
+                    'flex w-full group',
                     isUser ? 'justify-end' : 'justify-start'
                   )}
                 >
                   {(!isUser && (isCodeContent(msg.content))) ? (
-                    <CodeBubble
-                      codeText={extractCode(msg.content)}
-                      onApplyCode={onApplyCode}
-                      onApplyXml={onApplyXml}
-                    />
-                  ) : (
-                    <div className="relative inline-flex justify-end items-end">
-                      <button
-                          onClick={() => copyUserMessage(msg.content, idx)}
-                          className={cn(
-                            ' h-7 w-7  hover:bg-gray-50 text-gray-600 flex items-center justify-center'
-                          )}
-                          title="复制"
-                          aria-label="复制"
-                        >
-                          {copiedIndex === idx ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-600" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      <div
-                        className={cn(
-                          'max-w-[90%] px-4 py-2 text-[13px] leading-6 rounded-md shadow-none whitespace-pre-wrap break-words break-all border border-gray-200 bg-gray-100 text-gray-900'
-                        )}
-                      >
-                        {msg.content && (
-                          <div>
-                            {typeof msg.content === 'string'
-                              ? msg.content
-                              : Array.isArray(msg.content)
-                                ? msg.content.find(c => c.type === 'text')?.text || ''
-                                : ''
-                            }
-                          </div>
-                        )}
-                        {isUser && Array.isArray(msg.content) && msg.content.some(c => c.type === 'image_url') && (
-                          <div className={cn('mt-2 flex flex-wrap gap-2')}>
-                            {msg.content.filter(c => c.type === 'image_url').map((im, i) => (
-                              <img
-                                key={i}
-                                src={im.image_url?.url || ''}
-                                alt={`image-${i}`}
-                                className={cn(
-                                  'w-16 h-16 rounded-md object-cover ring-1 ring-gray-300'
-                                )}
-                              />
-                            ))}
-                          </div>
-                        )}
-                        {isUser && Array.isArray(msg.files) && msg.files.length > 0 && (
-                          <div className={cn('mt-2 flex flex-wrap gap-2')}>
-                            {msg.files.map((f, i) => (
-                              <span key={i} className={cn(
-                                'inline-flex items-center gap-1 pl-1 pr-1 py-0.5 rounded-md border text-[11px] bg-gray-200 border-gray-300 text-gray-800'
-                              )}>
-                                <FileText className="w-3 h-3 opacity-80" />
-                                <span className="truncate max-w-[160px]" title={f.name}>{f.name || 'file'}</span>
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                        {isUser && Array.isArray(msg.images) && msg.images.length > 0 && (
-                          <div className={cn('mt-2 flex flex-wrap gap-2')}>
-                            {msg.images.map((im, i) => (
-                              <img
-                                key={i}
-                                src={im.url}
-                                alt={im.name || 'image'}
-                                className={cn(
-                                  'w-16 h-16 rounded-md object-cover ring-1 ring-gray-300'
-                                )}
-                              />
-                            ))}
-                          </div>
-                        )}
+                    <div className="flex flex-col items-start gap-2 w-full min-w-0 animate-in slide-in-from-left-2 duration-300">
+                      <div className="flex items-center gap-2 mb-1 pl-1">
+                         <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm">
+                             <WandSparkles className="w-3.5 h-3.5 text-white" />
+                         </div>
+                         <span className="text-xs font-medium text-zinc-500">AI 生成</span>
                       </div>
+                      <CodeBubble
+                        codeText={extractCode(msg.content)}
+                        onApplyCode={onApplyCode}
+                        onApplyXml={onApplyXml}
+                      />
+                      {isAssistant && onRetryMessage && (
+                        <button
+                          type="button"
+                          disabled={isGenerating}
+                          onClick={() => onRetryMessage(idx)}
+                          className={cn(
+                            'ml-1 inline-flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-700 transition-colors px-2 py-1 rounded-md hover:bg-zinc-100',
+                            isGenerating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          )}
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>重新生成</span>
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={cn('flex flex-col max-w-[85%]', isUser ? 'items-end' : 'items-start')}>
+                      
+                      {!isUser && (
+                        <div className="flex items-center gap-2 mb-1.5 pl-1">
+                             <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-sm">
+                                 <WandSparkles className="w-3.5 h-3.5 text-white" />
+                             </div>
+                        </div>
+                      )}
+
+                      <div className="relative group/bubble">
+                        {/* Copy button for user messages */}
+                        {isUser && (
+                            <button
+                              onClick={() => copyUserMessage(msg.content, idx)}
+                              className="absolute -left-8 top-2 opacity-0 group-hover/bubble:opacity-100 transition-opacity p-1.5 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-full"
+                              title="复制"
+                            >
+                              {copiedIndex === idx ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            </button>
+                        )}
+                        
+                        <div
+                          className={cn(
+                            'px-4 py-3 text-[14px] leading-6 shadow-sm whitespace-pre-wrap break-words break-all',
+                            isUser 
+                              ? 'bg-zinc-100 text-zinc-900 rounded-[20px] rounded-tr-sm' 
+                              : 'bg-white border border-zinc-100 text-zinc-800 rounded-[20px] rounded-tl-sm'
+                          )}
+                        >
+                          {msg.content && (
+                            <div>
+                              {typeof msg.content === 'string'
+                                ? msg.content
+                                : Array.isArray(msg.content)
+                                  ? msg.content.find(c => c.type === 'text')?.text || ''
+                                  : ''
+                              }
+                            </div>
+                          )}
+                          {isUser && Array.isArray(msg.content) && msg.content.some(c => c.type === 'image_url') && (
+                            <div className={cn('mt-3 flex flex-wrap gap-2')}>
+                              {msg.content.filter(c => c.type === 'image_url').map((im, i) => (
+                                <img
+                                  key={i}
+                                  src={im.image_url?.url || ''}
+                                  alt={`image-${i}`}
+                                  className={cn(
+                                    'w-20 h-20 rounded-lg object-cover ring-1 ring-black/5 shadow-sm'
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          )}
+                          {isUser && Array.isArray(msg.files) && msg.files.length > 0 && (
+                            <div className={cn('mt-3 flex flex-wrap gap-2')}>
+                              {msg.files.map((f, i) => (
+                                <span key={i} className={cn(
+                                  'inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200 bg-white text-xs text-zinc-700 shadow-sm'
+                                )}>
+                                  <FileText className="w-3.5 h-3.5 text-zinc-400" />
+                                  <span className="truncate max-w-[160px]" title={f.name}>{f.name || 'file'}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                          {isUser && Array.isArray(msg.images) && msg.images.length > 0 && (
+                            <div className={cn('mt-3 flex flex-wrap gap-2')}>
+                              {msg.images.map((im, i) => (
+                                <img
+                                  key={i}
+                                  src={im.url}
+                                  alt={im.name || 'image'}
+                                  className={cn(
+                                    'w-20 h-20 rounded-lg object-cover ring-1 ring-black/5 shadow-sm'
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {isAssistant && onRetryMessage && (
+                        <button
+                          type="button"
+                          disabled={isGenerating}
+                          onClick={() => onRetryMessage(idx)}
+                          className={cn(
+                            'mt-1.5 ml-1 inline-flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-zinc-700 transition-colors px-2 py-1 rounded-md hover:bg-zinc-50',
+                            isGenerating ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                          )}
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>重新生成</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -557,189 +639,257 @@ export default function FloatingChat({
             })
           )}
           {isGenerating && (
-            <div className="flex justify-start">
-              <div className="w-[95%] min-w-0">
+            <div className="flex justify-start w-full animate-in fade-in duration-300">
+              <div className="w-full min-w-0">
                 {/* ✨ 实时显示生成的代码 */}
                 {streamingContent && streamingContent.trim() ? (
-                  <StreamingCodeBubble codeText={streamingContent} />
+                   <div className="flex flex-col items-start gap-2 w-full min-w-0">
+                     <div className="flex items-center gap-2 mb-1 pl-1">
+                         <div className="w-6 h-6 rounded-lg bg-zinc-100 flex items-center justify-center">
+                             <WandSparkles className="w-3.5 h-3.5 text-zinc-400 animate-pulse" />
+                         </div>
+                         <span className="text-xs font-medium text-zinc-500">正在绘制...</span>
+                      </div>
+                      <StreamingCodeBubble codeText={streamingContent} />
+                   </div>
                 ) : (
-                  <div className="rounded-xl px-4 py-2 text-sm bg-gray-100 border border-gray-200 shadow-none">
-                    <div className="flex space-x-2 items-center gap-2">
-                      正在绘制图表，请勿关闭页面
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  <div className="flex items-center gap-3 px-4 py-3 bg-zinc-50/80 border border-zinc-100 rounded-2xl w-fit">
+                    <div className="flex space-x-1.5 items-center">
+                      <div className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
+                    <span className="text-sm text-zinc-500">思考中...</span>
                   </div>
                 )}
               </div>
             </div>
           )}
           {/* Auto-scroll sentinel */}
-          <div id="chat-bottom-sentinel" ref={bottomRef} />
+          <div id="chat-bottom-sentinel" ref={bottomRef} className="h-1" />
         </div>
       </ScrollArea>
 
       {/* Input Area */}
-      <div className="p-4 space-y-3 bg-transparent rounded-b-3xl">
-        {/* Input Box */}
+      <div className="p-4 pt-0 bg-transparent">
         <div className="relative">
-          {/* File/Image chips overlay at the top-left of textarea */}
-          {(files.length > 0 || images.length > 0) && (
-            <div className="absolute left-3 top-3 z-10 flex flex-wrap gap-2 pr-12">
-              {/* text files */}
-              {files.map((f, idx) => (
-                <div key={`f-${idx}`} className="group flex items-center gap-1 max-w-[260px] pl-1 pr-1 py-0.5 rounded-full border border-gray-300 bg-white/90 shadow-sm">
-                  <span className="inline-flex items-center justify-center w-4 h-4 rounded bg-gray-100 text-gray-700">
-                    <FileText className="w-3 h-3" />
-                  </span>
-                  <span className="text-[11px] text-gray-700 truncate max-w-[180px]" title={f.name}>
-                    {f.name}
-                  </span>
-                  <button
-                    onClick={() => setFiles(prev => prev.filter((_, i) => i !== idx))}
-                    className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 hover:bg-gray-100 text-gray-500"
-                    title="移除文件"
-                  >
-                    <XIcon className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-              {/* images */}
-              {images.map((img, idx) => (
-                <div key={`i-${idx}`} className="group flex items-center gap-1 max-w-[260px] pl-1 pr-1 py-0.5 rounded-full border border-gray-300 bg-white/90 shadow-sm">
-                  {/* tiny thumbnail */}
-                  <img src={img.url} alt={img.name || 'image'} className="w-4 h-4 rounded object-cover" />
-                  <span className="text-[11px] text-gray-700 truncate max-w-[180px]" title={img.name || 'image'}>
-                    {img.name || 'image'}
-                  </span>
-                  <button
-                    onClick={() => {
-                      if (img.url) URL.revokeObjectURL(img.url);
-                      setImages(prev => prev.filter((_, i) => i !== idx));
-                    }}
-                    className="ml-0.5 inline-flex items-center justify-center rounded-full p-0.5 hover:bg-gray-100 text-gray-500"
-                    title="移除图片"
-                  >
-                    <XIcon className="w-3 h-3" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-          <Textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={(e) => {
-              const { items, files } = e.clipboardData || {};
-              const pastedFiles = [];
-              if (items && items.length) {
-                for (const item of items) {
-                  if (item.kind === 'file') {
-                    const f = item.getAsFile();
-                    if (f && f.type.startsWith('image/')) pastedFiles.push(f);
-                  }
-                }
-              } else if (files && files.length) {
-                for (const f of files) {
-                  if (f.type.startsWith('image/')) pastedFiles.push(f);
-                }
-              }
-              if (pastedFiles.length > 0) {
-                e.preventDefault();
-                const next = pastedFiles.map(f => ({ file: f, url: URL.createObjectURL(f), name: f.name, type: f.type }));
-                setImages(prev => [...prev, ...next]);
-              }
-            }}
-            placeholder="描述你的需求..."
-            rows={1}
-            maxLength={10000}
+          {/* Input Container */}
+          <div
             className={cn(
-              "min-h-[112px] max-h-[40vh] pr-14 pb-12 resize-none overflow-auto no-scrollbar rounded-2xl bg-white border-gray-200",
-              (images.length > 0 || files.length > 0) ? 'pt-10' : 'pt-3'
+              "flex flex-col bg-white border transition-all duration-200 rounded-2xl overflow-hidden shadow-sm",
+              isGenerating
+                ? "border-zinc-200 opacity-80"
+                : "border-zinc-300 hover:border-zinc-400 focus-within:ring-2 focus-within:ring-primary/10 focus-within:border-primary"
             )}
-            disabled={isGenerating}
-          />
-          {/* Bottom inline toolbar as overlay, visually merged with textarea */}
-          <div className="absolute left-0 right-0 bottom-0 flex items-center justify-between bg-white rounded-b-2xl px-2 py-2  border-gray-200">
-            <div className="flex items-center gap-1">
-              <TextFilePicker onPick={(picked) => {
-                const arr = Array.from(picked || []);
-                const allowed = arr.filter(f => {
-                  const ext = (f.name || '').toLowerCase().split('.').pop();
-                  const okExt = ext === 'md' || ext === 'txt';
-                  const type = (f.type || '').toLowerCase();
-                  const okType = type.includes('text') || type.includes('markdown') || type === '';
-                  return okExt || okType;
-                });
-                if (allowed.length) {
-                  const next = allowed.map(f => ({ file: f, name: f.name, type: f.type, size: f.size }));
-                  setFiles(prev => [...prev, ...next]);
-                  if (textareaRef.current) {
-                    textareaRef.current.focus();
+          >
+            {/* Attachment Chips (overlay) */}
+            {(files.length > 0 || images.length > 0) && (
+              <div className="px-3 pt-3 flex flex-wrap gap-2">
+                {/* text files */}
+                {files.map((f, idx) => (
+                  <div
+                    key={`f-${idx}`}
+                    className="group flex items-center gap-1.5 pl-1.5 pr-1 py-1 rounded-md border border-zinc-200 bg-zinc-50"
+                  >
+                    <div className="flex items-center justify-center w-5 h-5 rounded bg-white border border-zinc-100 text-zinc-500">
+                      <FileText className="w-3 h-3" />
+                    </div>
+                    <span className="text-xs text-zinc-700 truncate max-w-[120px]" title={f.name}>
+                      {f.name}
+                    </span>
+                    <button
+                      onClick={() => setFiles(prev => prev.filter((_, i) => i !== idx))}
+                      className="ml-1 hover:bg-zinc-200 rounded p-0.5 text-zinc-400 hover:text-zinc-600 transition-colors"
+                    >
+                      <XIcon className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+                {/* images */}
+                {images.map((img, idx) => (
+                  <div
+                    key={`i-${idx}`}
+                    className="group flex items-center gap-1.5 pl-1 pr-1 py-1 rounded-md border border-zinc-200 bg-zinc-50"
+                  >
+                    <img src={img.url} alt={img.name} className="w-5 h-5 rounded object-cover bg-white" />
+                    <span className="text-xs text-zinc-700 truncate max-w-[120px]" title={img.name}>
+                      {img.name || 'image'}
+                    </span>
+                    <button
+                      onClick={() => {
+                        if (img.url) URL.revokeObjectURL(img.url);
+                        setImages(prev => prev.filter((_, i) => i !== idx));
+                      }}
+                      className="ml-1 hover:bg-zinc-200 rounded p-0.5 text-zinc-400 hover:text-zinc-600 transition-colors"
+                    >
+                      <XIcon className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={(e) => {
+                const { items, files } = e.clipboardData || {};
+                const pastedFiles = [];
+                if (items && items.length) {
+                  for (const item of items) {
+                    if (item.kind === 'file') {
+                      const f = item.getAsFile();
+                      if (f && f.type.startsWith('image/')) pastedFiles.push(f);
+                    }
+                  }
+                } else if (files && files.length) {
+                  for (const f of files) {
+                    if (f.type.startsWith('image/')) pastedFiles.push(f);
                   }
                 }
-              }}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground"
-                  title="上传文件（仅支持 .md/.txt）"
-                >
-                  <FileText className="w-4 h-4" />
-                </Button>
-              </TextFilePicker>
-              {/* Image input trigger */}
-              <ImagePicker onPick={(files) => {
-                const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
-                if (imgs.length) {
-                  const next = imgs.map(f => ({ file: f, url: URL.createObjectURL(f), name: f.name, type: f.type }));
+                if (pastedFiles.length > 0) {
+                  e.preventDefault();
+                  const next = pastedFiles.map(f => ({
+                    file: f,
+                    url: URL.createObjectURL(f),
+                    name: f.name,
+                    type: f.type
+                  }));
                   setImages(prev => [...prev, ...next]);
-                  if (textareaRef.current) {
-                    textareaRef.current.focus();
-                  }
                 }
-              }}>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-muted-foreground"
-                  title="上传图片"
+              }}
+              placeholder="描述你的需求，支持上传图片/文件..."
+              rows={1}
+              maxLength={10000}
+              className={cn(
+                "min-h-[50px] max-h-[30vh] w-full px-3 py-3 resize-none bg-transparent border-none focus-visible:ring-0 text-sm text-zinc-800 placeholder:text-zinc-400",
+                "no-scrollbar"
+              )}
+              disabled={isGenerating}
+            />
+
+            {/* Bottom Toolbar */}
+            <div className="flex items-center justify-between px-2 py-2 bg-zinc-50/50 border-t border-zinc-100">
+              <div className="flex items-center gap-0.5">
+                <TextFilePicker
+                  onPick={(picked) => {
+                    const arr = Array.from(picked || []);
+                    const allowed = arr.filter(f => {
+                      const ext = (f.name || '').toLowerCase().split('.').pop();
+                      const okExt = ext === 'md' || ext === 'txt';
+                      const type = (f.type || '').toLowerCase();
+                      const okType = type.includes('text') || type.includes('markdown') || type === '';
+                      return okExt || okType;
+                    });
+                    if (allowed.length) {
+                      const next = allowed.map(f => ({
+                        file: f,
+                        name: f.name,
+                        type: f.type,
+                        size: f.size
+                      }));
+                      setFiles(prev => [...prev, ...next]);
+                      if (textareaRef.current) {
+                        textareaRef.current.focus();
+                      }
+                    }
+                  }}
                 >
-                  <ImageIcon className="w-4 h-4" />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/50 rounded-lg"
+                    title="上传文件"
+                  >
+                    <FileText className="w-4 h-4" />
+                  </Button>
+                </TextFilePicker>
+
+                <ImagePicker
+                  onPick={(files) => {
+                    const imgs = Array.from(files).filter(f => f.type.startsWith('image/'));
+                    if (imgs.length) {
+                      const next = imgs.map(f => ({
+                        file: f,
+                        url: URL.createObjectURL(f),
+                        name: f.name,
+                        type: f.type
+                      }));
+                      setImages(prev => [...prev, ...next]);
+                      if (textareaRef.current) {
+                        textareaRef.current.focus();
+                      }
+                    }
+                  }}
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-200/50 rounded-lg"
+                    title="上传图片"
+                  >
+                    <ImageIcon className="w-4 h-4" />
+                  </Button>
+                </ImagePicker>
+
+                <div className="h-4 w-px bg-zinc-200 mx-1" />
+
+                <button
+                  ref={typeMenuButtonRef}
+                  onClick={() => setShowTypeMenu((v) => !v)}
+                  className="h-7 px-2.5 text-xs font-medium rounded-md text-zinc-600 hover:bg-zinc-200/50 hover:text-zinc-900 transition-colors flex items-center gap-1"
+                  title="选择图表类型"
+                >
+                  {currentTypeLabel}
+                  <ChevronDown className="w-3 h-3 opacity-50" />
+                </button>
+              </div>
+
+              <div>
+                <Button
+                  onClick={handleSend}
+                  disabled={
+                    ((!input.trim() && images.length === 0 && files.length === 0) || isGenerating)
+                  }
+                  size="icon"
+                  className={cn(
+                    "h-8 w-8 rounded-lg shadow-sm transition-all duration-200",
+                    ((!input.trim() && images.length === 0 && files.length === 0) || isGenerating)
+                      ? "bg-zinc-100 text-zinc-300"
+                      : "bg-primary text-primary-foreground hover:bg-primary/90"
+                  )}
+                  title="发送"
+                >
+                  {isGenerating ? (
+                    <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <MoveUp className="w-4 h-4" />
+                  )}
                 </Button>
-              </ImagePicker>
-              <button
-                ref={typeMenuButtonRef} onClick={() => setShowTypeMenu((v) => !v)}
-                className="h-8 px-2 text-xs rounded-md hover:bg-gray-100 text-gray-700"
-                title="选择图表类型"
-              >
-                {currentTypeLabel}
-              </button>
-            </div>
-            <div>
-              <Button
-                onClick={handleSend}
-                disabled={((!input.trim() && images.length === 0 && files.length === 0) || isGenerating)}
-                size="icon"
-                className="h-8 w-8 rounded-md bg-primary text-primary-foreground shadow"
-                title="发送"
-              >
-                <MoveUp className="w-4 h-4" />
-              </Button>
+              </div>
             </div>
           </div>
+
           {showTypeMenu && (
-            <div ref={typeMenuRef} className="absolute left-2 bottom-14 w-44 rounded-xl bg-white border border-gray-200 shadow-lg p-1 text-sm z-10">
+            <div
+              ref={typeMenuRef}
+              className="absolute left-2 bottom-14 w-48 max-h-64 overflow-y-auto rounded-xl bg-white border border-zinc-200 shadow-xl p-1.5 text-sm z-10 animate-in slide-in-from-bottom-2 fade-in duration-200"
+            >
+              <div className="px-2 py-1.5 text-xs font-medium text-zinc-400">图表类型</div>
               {chartTypeOptions.map((opt) => (
                 <button
                   key={opt.value}
-                  onClick={() => { setChartType(opt.value); setShowTypeMenu(false); }}
+                  onClick={() => {
+                    setChartType(opt.value);
+                    setShowTypeMenu(false);
+                  }}
                   className={cn(
-                    'w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50',
-                    chartType === opt.value ? 'bg-gray-50' : ''
+                    "w-full text-left px-3 py-2 rounded-lg transition-colors text-zinc-700",
+                    chartType === opt.value
+                      ? "bg-zinc-100 font-medium text-zinc-900"
+                      : "hover:bg-zinc-50"
                   )}
                 >
                   {opt.label}
@@ -761,18 +911,30 @@ export default function FloatingChat({
 
 // ✨ 流式生成中的代码气泡（简化版，只显示代码，不可交互）
 function StreamingCodeBubble({ codeText }) {
+  const preRef = useRef(null);
+
+  // Keep streaming code view pinned to bottom as new chunks arrive
+  useEffect(() => {
+    try {
+      if (!preRef.current) return;
+      const el = preRef.current;
+      el.scrollTop = el.scrollHeight;
+    } catch {}
+  }, [codeText]);
+
   return (
-    <div className="w-full min-w-0 rounded-md overflow-hidden border border-gray-200 bg-gray-50 text-gray-900 shadow-none">
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-100 border-b border-gray-200">
-        <div className="flex items-center gap-2 text-[12px] font-medium text-gray-700">
-          <Code2 className="w-3.5 h-3.5 opacity-80" />
-          <span>正在生成...</span>
+    <div className="w-full min-w-0 rounded-xl overflow-hidden border border-zinc-200 bg-zinc-50 shadow-sm">
+      <div className="flex items-center justify-between px-3 py-2 bg-zinc-100/50 border-b border-zinc-200">
+        <div className="flex items-center gap-2 text-[11px] font-medium text-zinc-500">
+          <Code2 className="w-3.5 h-3.5" />
+          <span>代码生成中...</span>
         </div>
       </div>
       <div className="relative w-full min-w-0">
         <pre
+          ref={preRef}
           className={cn(
-            'font-mono text-[12px] leading-6 px-3 py-3 whitespace-pre-wrap break-words break-all text-gray-800 max-h-[60vh] overflow-auto w-full max-w-full min-w-0'
+            'font-mono text-[12px] leading-relaxed px-4 py-3 whitespace-pre-wrap break-words break-all text-zinc-600 max-h-[50vh] overflow-auto w-full max-w-full min-w-0'
           )}
         >{codeText}</pre>
       </div>
@@ -809,49 +971,53 @@ function CodeBubble({ codeText, onApplyCode, onApplyXml }) {
   };
 
   return (
-    <div className="w-[95%] min-w-0 rounded-md overflow-hidden border border-gray-200 bg-gray-50 text-gray-900 shadow-none">
+    <div className="w-[98%] min-w-0 rounded-xl overflow-hidden border border-zinc-200 bg-white shadow-sm group/code">
       <div
-        className="flex items-center justify-between px-3 py-2 bg-gray-100 border-b border-gray-200 cursor-pointer"
+        className="flex items-center justify-between px-3 py-2 bg-zinc-50 border-b border-zinc-100 cursor-pointer hover:bg-zinc-100 transition-colors"
         onClick={() => setExpanded(v => !v)}
         title={expanded ? '收起' : '展开'}
       >
-        <div className="flex items-center gap-2 text-[12px] font-medium text-gray-700">
-          <Code2 className="w-3.5 h-3.5 opacity-80" />
-          {/* <span>CODE</span> */}
+        <div className="flex items-center gap-2 text-[12px] font-medium text-zinc-600">
+          <Code2 className="w-4 h-4 text-zinc-400" />
+          <span className="font-mono text-zinc-500">Generated Code</span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-2">
           <button
             onClick={(e) => {
               e.stopPropagation();
               handleApply();
             }}
-            className="inline-flex items-center gap-1 h-7 px-2 rounded-md text-xs text-gray-700 hover:bg-gray-200"
+            className="inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md text-xs font-medium bg-emerald-50 text-emerald-600 border border-emerald-100 hover:bg-emerald-100 hover:border-emerald-200 transition-all"
             title="应用到画布"
           >
-            <SquareMousePointer className="w-3.5 h-3.5 text-emerald-600" />
-            {/* <span className="hidden sm:inline">应用</span> */}
+            <SquareMousePointer className="w-3.5 h-3.5" />
+            <span>应用</span>
           </button>
+          <div className="w-px h-3.5 bg-zinc-200 mx-0.5" />
           <ChevronDown
             className={cn(
-              'w-4 h-4 text-gray-600 transition-transform',
-              expanded ? 'rotate-0' : '-rotate-90'
+              'w-4 h-4 text-zinc-400 transition-transform duration-200',
+              expanded ? 'rotate-180' : 'rotate-0'
             )}
           />
         </div>
       </div>
       {expanded && (
-        <div className="relative w-full min-w-0">
-          <button
-            onClick={copyToClipboard}
-            className="absolute right-2 top-2 z-10 px-2 h-7 text-[12px] rounded-md text-gray-700 hover:bg-gray-200 flex items-center gap-1"
-            title="复制代码"
-          >
-            {copied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-            <span>{copied ? '已复制' : '复制'}</span>
-          </button>
+        <div className="relative w-full min-w-0 bg-zinc-50/50">
+          <div className="absolute right-2 top-2 z-10 flex gap-2">
+             <button
+                onClick={copyToClipboard}
+                className="px-2 h-7 text-[11px] rounded-md bg-white border border-zinc-200 text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 shadow-sm flex items-center gap-1.5 transition-all"
+                title="复制代码"
+              >
+                {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                <span>{copied ? '已复制' : '复制'}</span>
+              </button>
+          </div>
+          
           <pre
             className={cn(
-              'font-mono text-[12px] leading-6 px-3 py-3 pt-10 whitespace-pre-wrap break-words break-all text-gray-800 max-h-[60vh] overflow-auto w-full max-w-full min-w-0'
+              'font-mono text-[12px] leading-6 px-4 py-4 pt-8 whitespace-pre-wrap break-words break-all text-zinc-700 max-h-[60vh] overflow-auto w-full max-w-full min-w-0'
             )}
           >{codeText}</pre>
         </div>

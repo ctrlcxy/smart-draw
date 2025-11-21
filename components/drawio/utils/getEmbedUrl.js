@@ -15,7 +15,7 @@ export function getEmbedUrl(baseUrl, urlParameters = {}, hasConfiguration = fals
     spin: '1',
     libraries: '1',
     saveAndExit: '0',
-    noSaveBtn: '0',
+    noSaveBtn: '1',
     noExitBtn: '1',
     ...(hasConfiguration ? { configure: '1' } : {})
   };

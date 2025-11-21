@@ -4,14 +4,16 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import AppHeader from '@/components/AppHeader';
 import dynamic from 'next/dynamic';
 import FloatingChat from '@/components/FloatingChat';
+import FloatingCodeEditor from '@/components/FloatingCodeEditor';
 import ConfigManager from '@/components/ConfigManager';
 import ContactModal from '@/components/ContactModal';
 import HistoryModal from '@/components/HistoryModal';
 import CombinedSettingsModal from '@/components/CombinedSettingsModal';
 import Notification from '@/components/Notification';
 import ConfirmDialog from '@/components/ConfirmDialog';
-import { getConfig } from '@/lib/config';
+import { configService } from '@/lib/config-service';
 import { useEngine } from '@/hooks/useEngine';
+import { drawioProcessor, excalidrawProcessor } from '@/lib/code-processor';
 
 // Dynamically import Canvas components to avoid SSR issues
 const DrawioCanvas = dynamic(() => import('@/components/DrawioCanvas'), {
@@ -59,65 +61,105 @@ export default function DrawPage() {
   // Chat面板宽度（用于调整画布padding）
   const [chatPanelWidth, setChatPanelWidth] = useState(0);
 
+  // 清空悬浮代码编辑器缓存和内容（在引擎切换时调用）
+  const clearFloatingCodeCache = useCallback(() => {
+    if (typeof window === 'undefined') return;
+
+    try {
+      const ls = window.localStorage;
+      const keysToRemove = [];
+      for (let i = 0; i < ls.length; i += 1) {
+        const key = ls.key(i);
+        if (!key) continue;
+        if (key.startsWith('smart-diagram-floating-code-cache')) {
+          keysToRemove.push(key);
+        }
+      }
+      keysToRemove.forEach((key) => {
+        try {
+          ls.removeItem(key);
+        } catch {
+          // ignore single-key errors
+        }
+      });
+    } catch (e) {
+      console.error('Failed to clear floating code cache:', e);
+    }
+
+    try {
+      window.dispatchEvent(new CustomEvent('floating-code-editor-reset'));
+    } catch (e) {
+      console.error('Failed to dispatch floating code editor reset event:', e);
+    }
+  }, []);
+
+  // 在客户端挂载后，从 localStorage 恢复引擎类型，避免 SSR 与 CSR 初始值不一致
+  useEffect(() => {
+    try {
+      const saved = typeof window !== 'undefined'
+        ? localStorage.getItem('smart-diagram-engine-type')
+        : null;
+      if (saved === 'drawio' || saved === 'excalidraw') {
+        setEngineType(saved);
+      }
+    } catch (e) {
+      console.error('Failed to read engine type from localStorage:', e);
+    }
+  }, []);
+
+  // 将当前引擎类型持久化到 localStorage，便于刷新后恢复
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('smart-diagram-engine-type', engineType);
+    } catch (e) {
+      console.error('Failed to save engine type to localStorage:', e);
+    }
+  }, [engineType]);
+
   // Load config on mount and listen for config changes
   useEffect(() => {
-    const savedConfig = getConfig();
+    const savedConfig = configService.getCurrentConfig();
     if (savedConfig) {
       setConfig(savedConfig);
     }
 
     // Load password access state
-    const passwordEnabled =
-      localStorage.getItem('smart-diagram-use-password') === 'true';
+    const passwordEnabled = configService.isPasswordMode();
     setUsePassword(passwordEnabled);
 
-    // Listen for storage changes to sync across tabs
+    // Listen for unified config change event
+    const handleConfigChange = (e) => {
+      const newConfig = e.detail?.config || configService.getCurrentConfig();
+      setConfig(newConfig);
+      setUsePassword(configService.isPasswordMode());
+    };
+
+    // Listen for storage changes to sync across tabs (fallback)
     const handleStorageChange = (e) => {
       const key = e?.key;
 
-      // 任意 LLM 配置相关 key 变化时，重新计算“最终生效配置”
+      // 任意 LLM 配置相关 key 变化时，重新计算"最终生效配置"
       const configKeys = [
         'smart-diagram-local-configs',
         'smart-diagram-active-local-config',
         'smart-diagram-remote-config',
-        // 兼容旧版 / 调试快照
-        'smart-diagram-configs',
-        'smart-diagram-active-config',
+        'smart-diagram-use-password',
       ];
 
       if (!key || configKeys.includes(key)) {
-        const newConfig = getConfig();
+        const newConfig = configService.getCurrentConfig();
         setConfig(newConfig);
-      }
-
-      if (key === 'smart-diagram-use-password') {
-        const enabled =
-          localStorage.getItem('smart-diagram-use-password') === 'true';
-        setUsePassword(enabled);
+        setUsePassword(configService.isPasswordMode());
       }
     };
 
-    // Listen for custom event from CombinedSettingsModal (same tab)
-    const handlePasswordSettingsChanged = (e) => {
-      const enabled = !!e.detail?.usePassword;
-      setUsePassword(enabled);
-      // 模式切换后重新计算当前生效配置
-      const newConfig = getConfig();
-      setConfig(newConfig);
-    };
-
+    window.addEventListener('config-changed', handleConfigChange);
     window.addEventListener('storage', handleStorageChange);
-    window.addEventListener(
-      'password-settings-changed',
-      handlePasswordSettingsChanged,
-    );
 
     return () => {
+      window.removeEventListener('config-changed', handleConfigChange);
       window.removeEventListener('storage', handleStorageChange);
-      window.removeEventListener(
-        'password-settings-changed',
-        handlePasswordSettingsChanged,
-      );
     };
   }, []);
 
@@ -159,13 +201,14 @@ export default function DrawPage() {
       message: '切换绘图引擎将清空当前对话历史和画布内容，确定要切换吗？',
       type: 'warning',
       onConfirm: () => {
+        clearFloatingCodeCache();
         setEngineType(newEngine);
         // 调用引擎的handleNewChat清空状态
         engine.handleNewChat();
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
       }
     });
-  }, [engineType, engine]);
+  }, [engineType, engine, clearFloatingCodeCache]);
 
   /**
    * 发送消息处理
@@ -176,19 +219,60 @@ export default function DrawPage() {
   }, [engine, config, showNotification]);
 
   /**
-   * 应用代码处理（用户点击"应用"按钮）
-   * 调用引擎的handleApplyCode
+   * 针对指定的 AI 消息执行重试
    */
-  const handleApplyCode = useCallback(async (code) => {
-    await engine.handleApplyCode(code);
-    showNotification({ title: '已应用', message: '代码已应用到画布', type: 'success' });
+  const handleRetryMessage = useCallback(async (messageIndex) => {
+    if (!engine || typeof engine.handleRetryMessage !== 'function') return;
+    await engine.handleRetryMessage(messageIndex, showNotification);
   }, [engine, showNotification]);
 
   /**
-   * 画布编辑处理
-   * 调用引擎的handleCanvasChange
+   * 从外部（如聊天面板）应用代码
+   * 需要触发事件同步给 FloatingCodeEditor
    */
-  const handleCanvasChange = useCallback(async (code) => {
+  const handleChatApplyCode = useCallback(async (code) => {
+    const targetCode = typeof code === 'string' ? code : '';
+    await engine.handleApplyCode(code);
+    if (!targetCode || typeof window === 'undefined') return;
+    try {
+      window.dispatchEvent(
+        new CustomEvent('canvas-code-changed', {
+          detail: {
+            engineType,
+            code: targetCode,
+          },
+        }),
+      );
+    } catch (error) {
+      console.error('Failed to dispatch canvas code change event:', error);
+    }
+  }, [engine, engineType]);
+
+  /**
+   * 直接从 FloatingCodeEditor 应用代码
+   * 编辑器本身已通过事件获得代码，不需要额外派发
+   */
+  const handleEditorApplyCode = useCallback(async (code) => {
+    await engine.handleApplyCode(code);
+  }, [engine]);
+
+  /**
+   * 代码处理函数
+   * 根据引擎类型调用相应的代码处理管道
+   * 流程：代码检测修复 -> 返回修复后的代码
+   */
+  const processCode = useCallback((code) => {
+    if (engineType === 'excalidraw') {
+      return excalidrawProcessor.process(code);
+    }
+    return drawioProcessor.process(code);
+  }, [engineType]);
+
+  /**
+   * Draw.io 画布 autosave 回调
+   * 仍然调用引擎的 handleCanvasChange 做持久化
+   */
+  const handleDrawioAutosave = useCallback(async (code) => {
     await engine.handleCanvasChange(code);
   }, [engine]);
 
@@ -216,6 +300,7 @@ export default function DrawPage() {
         message: `该历史记录使用的是 ${history.editor === 'drawio' ? 'Draw.io' : 'Excalidraw'} 引擎，当前是 ${engineType === 'drawio' ? 'Draw.io' : 'Excalidraw'} 引擎。\n\n是否切换引擎？切换后将清空当前对话。`,
         type: 'warning',
         onConfirm: () => {
+          clearFloatingCodeCache();
           setEngineType(history.editor);
           // 等待引擎切换完成后再恢复历史
           setTimeout(async () => {
@@ -232,7 +317,7 @@ export default function DrawPage() {
     await engine.handleRestoreHistory(history);
     setIsHistoryModalOpen(false);
     showNotification({ title: '已恢复', message: '历史记录已恢复', type: 'success' });
-  }, [engineType, engine, showNotification]);
+  }, [engineType, engine, showNotification, clearFloatingCodeCache]);
 
   /**
    * 缓存 Excalidraw elements 解析结果
@@ -262,10 +347,21 @@ export default function DrawPage() {
       return (
         <ExcalidrawCanvas
           elements={excalidrawElements}
+          showNotification={showNotification}
           onChange={(newElements) => {
-            // 用户编辑画布后，序列化elements并调用handleCanvasChange
-            const code = JSON.stringify(newElements);
-            handleCanvasChange(code);
+            try {
+              const code = JSON.stringify(newElements || [], null, 2);
+              window.dispatchEvent(
+                new CustomEvent('canvas-code-changed', {
+                  detail: {
+                    engineType: 'excalidraw',
+                    code,
+                  },
+                }),
+              );
+            } catch (error) {
+              console.error('Failed to serialize Excalidraw elements:', error);
+            }
           }}
         />
       );
@@ -275,13 +371,22 @@ export default function DrawPage() {
     return (
       <DrawioCanvas
         xml={engine.usedCode}
+        autosave
         onSave={(xmlOrData) => {
-          // 提取XML并调用handleCanvasChange
+          // 提取XML并通过事件通知代码编辑器
           const xml = typeof xmlOrData === 'string' ? xmlOrData : (xmlOrData?.data || '');
-          if (xml) {
-            handleCanvasChange(xml);
-          }
+          if (!xml) return;
+
+          window.dispatchEvent(
+            new CustomEvent('canvas-code-changed', {
+              detail: {
+                engineType: 'drawio',
+                code: xml,
+              },
+            }),
+          );
         }}
+        onAutosave={handleDrawioAutosave}
       />
     );
   };
@@ -301,7 +406,8 @@ export default function DrawPage() {
         engineType={engineType}
         onEngineSwitch={handleEngineSwitch}
         onSendMessage={handleSendMessage}
-        onApplyCode={handleApplyCode}
+        onRetryMessage={handleRetryMessage}
+        onApplyCode={handleChatApplyCode}
         isGenerating={engine.isGenerating}
         messages={engine.messages}
         streamingContent={engine.streamingContent} // ✨ 传递流式内容
@@ -309,6 +415,14 @@ export default function DrawPage() {
         conversationId={engine.conversationId}
         onOpenHistory={() => setIsHistoryModalOpen(true)}
         onOpenSettings={() => setIsCombinedSettingsOpen(true)}
+      />
+
+      {/* Floating Code Editor */}
+      <FloatingCodeEditor
+        engineType={engineType}
+        onApplyCode={handleEditorApplyCode}
+        processCode={processCode}
+        messages={engine.messages}
       />
 
       {/* Config Manager Modal */}

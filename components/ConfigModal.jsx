@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { configManager } from '../lib/config-manager.js';
+import { Settings, X, Server, Key, Bot, Search, Loader2, AlertCircle, Info, CheckCircle2 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
-export default function ConfigModal({ isOpen, onClose, onSave, initialConfig, showManager = false }) {
+export default function ConfigModal({ isOpen, onClose, onSave, initialConfig }) {
   const [config, setConfig] = useState({
     name: '',
     type: 'openai',
@@ -16,7 +17,7 @@ export default function ConfigModal({ isOpen, onClose, onSave, initialConfig, sh
   const [error, setError] = useState('');
   const [useCustomModel, setUseCustomModel] = useState(false);
 
-  // 仅在初始配置变更时同步到本地表单状态，避免在模型加载失败时还原用户输入
+  // 仅在初始配置变更时同步到本地表单状态
   useEffect(() => {
     if (initialConfig) {
       setConfig(initialConfig);
@@ -90,186 +91,215 @@ export default function ConfigModal({ isOpen, onClose, onSave, initialConfig, sh
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/50"
+        className="absolute inset-0 bg-zinc-900/40 backdrop-blur-sm animate-in fade-in duration-200"
         onClick={onClose}
       />
 
       {/* Modal */}
-      <div className="relative bg-white rounded border border-gray-300 w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-white w-full max-w-lg flex flex-col rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border border-zinc-200 max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">LLM 配置</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-100 bg-zinc-50/50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-white border border-zinc-200 rounded-lg shadow-sm">
+              <Settings className="w-5 h-5 text-zinc-600" />
+            </div>
+            <div>
+                <h2 className="text-lg font-semibold text-zinc-900">LLM 配置</h2>
+                <p className="text-xs text-zinc-500">设置 API 连接参数</p>
+            </div>
+          </div>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+            className="p-2 text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 rounded-full transition-colors"
           >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="px-6 py-4 space-y-4">
-          {error && (
-            <div className="px-4 py-3 bg-red-50 border border-red-200 rounded">
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
-          )}
-
-          <div className="px-4 py-3 bg-blue-50 border border-blue-200 rounded">
-            <p className="text-sm text-blue-800">提示：如果启用了访问密码，将优先使用服务器端配置</p>
-          </div>
-
-          {/* Provider Name */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              提供商名称
-            </label>
-            <input
-              type="text"
-              value={config.name}
-              onChange={(e) => setConfig({ ...config, name: e.target.value })}
-              placeholder="例如：我的 OpenAI"
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          {/* Provider Type */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              提供商类型 <span className="text-red-500">*</span>
-            </label>
-            <select
-              value={config.type}
-              onChange={(e) => setConfig({ ...config, type: e.target.value, model: '' })}
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
-            >
-              <option value="openai">OpenAI兼容（如DeepSeek）</option>
-              <option value="anthropic">Anthropic兼容</option>
-            </select>
-          </div>
-
-          {/* Base URL */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              基础 URL <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              value={config.baseUrl}
-              onChange={(e) => setConfig({ ...config, baseUrl: e.target.value })}
-              placeholder={config.type === 'openai' ? 'https://api.openai.com/v1' : 'https://api.anthropic.com/v1'}
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          {/* API Key */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              API 密钥 <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="password"
-              value={config.apiKey}
-              onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-              placeholder="sk-..."
-              className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
-            />
-          </div>
-
-          {/* Load Models Button */}
-          <div>
-            <button
-              onClick={handleLoadModels}
-              disabled={loading}
-              className="w-full px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded hover:bg-gray-50 disabled:bg-gray-50 disabled:text-gray-400 transition-colors duration-200 font-medium"
-            >
-              {loading ? '加载模型中...' : '加载可用模型'}
-            </button>
-          </div>
-
-          {/* Model Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              模型 <span className="text-red-500">*</span>
-            </label>
-            <p className="text-xs text-gray-500 mb-2">推荐 claude-sonnet-4.5</p>
-
-            {/* Toggle between selection and custom input */}
-            {models.length > 0 && (
-              <div className="mb-2 flex items-center space-x-4">
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={!useCustomModel}
-                    onChange={() => {
-                      setUseCustomModel(false);
-                      if (models.length > 0) {
-                        setConfig({ ...config, model: models[0].id });
-                      }
-                    }}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">从列表选择</span>
-                </label>
-                <label className="flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={useCustomModel}
-                    onChange={() => {
-                      setUseCustomModel(true);
-                      setConfig({ ...config, model: '' });
-                    }}
-                    className="mr-2"
-                  />
-                  <span className="text-sm text-gray-700">手动输入</span>
-                </label>
+        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-6">
+          {/* Alerts */}
+          <div className="space-y-3">
+              {error && (
+                <div className="px-4 py-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2 text-sm text-red-600 animate-in fade-in slide-in-from-top-1">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+              
+              <div className="px-4 py-3 bg-blue-50/50 border border-blue-100 rounded-xl flex items-start gap-2 text-sm text-blue-600">
+                <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>提示：若启用了“访问密码”模式，系统将优先使用服务器端配置。</span>
               </div>
-            )}
+          </div>
 
-            {/* Model Selection Dropdown */}
-            {models.length > 0 && !useCustomModel && (
-              <select
-                value={config.model}
-                onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
-              >
-                {models.map((model) => (
-                  <option key={model.id} value={model.id}>
-                    {model.name}
-                  </option>
-                ))}
-              </select>
-            )}
+          {/* Section 1: Basic Info */}
+          <div className="space-y-4">
+            <div>
+                <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+                  配置名称
+                </label>
+                <input
+                  type="text"
+                  value={config.name}
+                  onChange={(e) => setConfig({ ...config, name: e.target.value })}
+                  placeholder="例如：我的 OpenAI"
+                  className="w-full px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-all bg-white"
+                />
+            </div>
+          </div>
 
-            {/* Custom Model Input */}
-            {(useCustomModel || models.length === 0) && (
-              <input
-                type="text"
-                value={config.model}
-                onChange={(e) => setConfig({ ...config, model: e.target.value })}
-                placeholder="例如：gpt-4、claude-3-opus-20240229"
-                className="w-full px-3 py-2 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-gray-900"
-              />
-            )}
+          {/* Section 2: Connection Settings */}
+          <div className="space-y-4 pt-2">
+            <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider px-1">连接设置</h3>
+            
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+                提供商类型 <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <select
+                  value={config.type}
+                  onChange={(e) => setConfig({ ...config, type: e.target.value, model: '' })}
+                  className="w-full px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-all bg-white appearance-none"
+                >
+                  <option value="openai">OpenAI 兼容 (如 DeepSeek)</option>
+                  <option value="anthropic">Anthropic 兼容</option>
+                </select>
+                <div className="absolute right-3 top-2.5 pointer-events-none text-zinc-400">
+                   <Bot className="w-4 h-4" />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+                基础 URL <span className="text-red-500">*</span>
+              </label>
+              <div className="relative group">
+                <Server className="absolute left-3 top-2.5 w-4 h-4 text-zinc-400 group-focus-within:text-zinc-600 transition-colors" />
+                <input
+                  type="text"
+                  value={config.baseUrl}
+                  onChange={(e) => setConfig({ ...config, baseUrl: e.target.value })}
+                  placeholder={config.type === 'openai' ? 'https://api.openai.com/v1' : 'https://api.anthropic.com/v1'}
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-all bg-white"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-500 mb-1.5">
+                API 密钥 <span className="text-red-500">*</span>
+              </label>
+              <div className="relative group">
+                <Key className="absolute left-3 top-2.5 w-4 h-4 text-zinc-400 group-focus-within:text-zinc-600 transition-colors" />
+                <input
+                  type="password"
+                  value={config.apiKey}
+                  onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
+                  placeholder="sk-..."
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-all bg-white font-mono"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Section 3: Model Settings */}
+          <div className="space-y-4 pt-2 border-t border-zinc-100">
+             <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-zinc-900 uppercase tracking-wider px-1">模型参数</h3>
+                <button
+                  onClick={handleLoadModels}
+                  disabled={loading}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-2 py-1 rounded transition-colors flex items-center gap-1 disabled:opacity-50"
+                >
+                  {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Search className="w-3 h-3" />}
+                  {loading ? '加载中...' : '获取模型列表'}
+                </button>
+             </div>
+
+            <div>
+              {models.length > 0 && (
+                <div className="mb-3 flex p-1 bg-zinc-100 rounded-lg w-full">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setUseCustomModel(false);
+                            if (models.length > 0) {
+                                setConfig({ ...config, model: models[0].id });
+                            }
+                        }}
+                        className={cn(
+                            "flex-1 text-xs font-medium py-1.5 rounded-md transition-all",
+                            !useCustomModel ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
+                        )}
+                    >
+                        列表选择
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setUseCustomModel(true);
+                            setConfig({ ...config, model: '' });
+                        }}
+                        className={cn(
+                            "flex-1 text-xs font-medium py-1.5 rounded-md transition-all",
+                            useCustomModel ? "bg-white text-zinc-900 shadow-sm" : "text-zinc-500 hover:text-zinc-700"
+                        )}
+                    >
+                        手动输入
+                    </button>
+                </div>
+              )}
+
+              {models.length > 0 && !useCustomModel ? (
+                <div className="relative">
+                    <select
+                    value={config.model}
+                    onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-all bg-white appearance-none"
+                    >
+                    {models.map((model) => (
+                        <option key={model.id} value={model.id}>
+                        {model.name || model.id}
+                        </option>
+                    ))}
+                    </select>
+                    <div className="absolute right-3 top-2.5 pointer-events-none text-zinc-400">
+                        <Bot className="w-4 h-4" />
+                    </div>
+                </div>
+              ) : (
+                <input
+                  type="text"
+                  value={config.model}
+                  onChange={(e) => setConfig({ ...config, model: e.target.value })}
+                  placeholder="例如：gpt-4、claude-3-opus-20240229"
+                  className="w-full px-3 py-2 text-sm border border-zinc-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-900 transition-all bg-white"
+                />
+              )}
+              <p className="text-[10px] text-zinc-400 mt-1.5 px-1">
+                  推荐使用 claude-sonnet-3.5 或 gpt-4o 以获得最佳效果
+              </p>
+            </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="flex justify-end space-x-3 px-6 py-4 border-t border-gray-200">
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-zinc-100 bg-zinc-50/50">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-gray-700 bg-white border border-gray-300 rounded hover:bg-gray-50 transition-colors duration-200"
+            className="px-4 py-2 text-sm font-medium text-zinc-600 bg-white border border-zinc-200 rounded-lg hover:bg-zinc-50 hover:text-zinc-900 transition-colors"
           >
             取消
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 text-white bg-gray-900 rounded hover:bg-gray-800 transition-colors duration-200"
+            className="px-6 py-2 text-sm font-medium text-white bg-zinc-900 rounded-lg hover:bg-zinc-800 shadow-sm hover:shadow-md transition-all"
           >
             保存配置
           </button>
@@ -278,4 +308,3 @@ export default function ConfigModal({ isOpen, onClose, onSave, initialConfig, sh
     </div>
   );
 }
-

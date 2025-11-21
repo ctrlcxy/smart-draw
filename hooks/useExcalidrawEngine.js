@@ -2,74 +2,39 @@
 
 import { useCallback } from 'react';
 import { fixJSON } from '@/lib/fixUnclosed';
-import { historyManager } from '@/lib/history-manager';
 import { optimizeExcalidrawCode } from '@/lib/optimizeArrows';
 import { SYSTEM_PROMPT, USER_PROMPT_TEMPLATE } from '@/lib/prompts/excalidraw';
+import { excalidrawProcessor } from '@/lib/code-processor';
 import { useEngineShared } from './useEngineShared';
 
 /**
  * Excalidraw 引擎 Hook
- * 封装 Excalidraw 相关的业务逻辑：
- * - 代码后处理（JSON 提取 + 修复）
- * - LLM 消息收发与流式解析
- * - 历史记录读写
+ * 使用模板方法处理消息发送，只定义特定的后处理逻辑
  */
 export function useExcalidrawEngine() {
   // 使用共享的引擎逻辑
+  const shared = useEngineShared();
+
   const {
     usedCode,
     setUsedCode,
     messages,
-    setMessages,
     isGenerating,
-    setIsGenerating,
     streamingContent,
-    setStreamingContent,
     conversationId,
     lastError,
-    setLastError,
-    buildUserMessage,
-    buildFullMessages,
-    callLLMStream,
-    processSSEStreamAlt,
-    validateConfig,
+    handleSendMessageTemplate,
     handleNewChat,
     restoreHistoryBase,
-  } = useEngineShared();
+    parseSSEStreamAlt,
+    handleRetryMessageTemplate,
+  } = shared;
 
   /**
-   * 从 LLM 输出中稳健地提取 Excalidraw JSON 文本
+   * 后处理 Excalidraw JSON 代码：使用代码处理管道
    */
   const postProcessExcalidrawCode = useCallback((code) => {
-    if (!code || typeof code !== 'string') return '';
-    let text = code
-      .replace(/\ufeff/g, '')
-      .replace(/[\u200B-\u200D\u2060]/g, '')
-      .trim();
-
-    // 优先使用 ```json ``` 或任意 ``` ``` 代码块
-    const fencedJson =
-      text.match(/```\s*json\s*([\s\S]*?)```/i) ||
-      text.match(/```\s*([\s\S]*?)```/);
-    if (fencedJson && fencedJson[1]) text = fencedJson[1].trim();
-
-    // 尝试提取主要 JSON 块
-    const idxObjStart = text.indexOf('{');
-    const idxObjEnd = text.lastIndexOf('}');
-    const idxArrStart = text.indexOf('[');
-    const idxArrEnd = text.lastIndexOf(']');
-
-    if (
-      idxArrStart !== -1 &&
-      idxArrEnd !== -1 &&
-      (idxObjStart === -1 || idxArrStart < idxObjStart)
-    ) {
-      text = text.slice(idxArrStart, idxArrEnd + 1);
-    } else if (idxObjStart !== -1 && idxObjEnd !== -1) {
-      text = text.slice(idxObjStart, idxObjEnd + 1);
-    }
-
-    return text.trim();
+    return excalidrawProcessor.process(code);
   }, []);
 
   /**
@@ -98,7 +63,7 @@ export function useExcalidrawEngine() {
    * 应用代码到画布：
    * - 解析 / 修复 / 优化 JSON
    * - 更新 usedCode
-   * - 写入历史
+   * - 写入本地状态
    */
   const handleApplyCode = useCallback(
     async (code) => {
@@ -110,132 +75,83 @@ export function useExcalidrawEngine() {
           : fixed;
 
         setUsedCode(optimized);
-        await historyManager.updateUsedCode(conversationId, optimized);
       } catch (error) {
         console.error('Apply code error:', error);
       }
     },
-    [conversationId, postProcessExcalidrawCode, setUsedCode],
+    [postProcessExcalidrawCode, setUsedCode],
   );
 
   /**
    * 发送消息并调用 LLM：
-   * - 支持文本 + 图片 multimodal
-   * - 流式解析 SSE
-   * - 自动应用生成的 JSON 到画布
+   * 使用模板方法，只需提供 Excalidraw 特定的后处理逻辑
+   * 注意：不再自动应用到画布，由用户通过编辑器点击"应用"按钮
    */
   const handleSendMessage = useCallback(
     async (input, attachments = [], chartType = 'auto', _unusedConfig, showNotification) => {
-      const trimmed = (input || '').trim();
-      if (!trimmed && (!attachments || attachments.length === 0)) return;
-
       try {
-        setIsGenerating(true);
-        setStreamingContent('');
-        setLastError(null);
-
-        // 1. 验证 LLM 配置
-        const llmConfig = validateConfig(showNotification);
-        if (!llmConfig) return;
-
-        // 2. System Message
-        const systemMessage = {
-          role: 'system',
-          content: SYSTEM_PROMPT,
-        };
-
-        // 3. User Message（应用模板）
-        const userContent = USER_PROMPT_TEMPLATE(trimmed, chartType);
-        const userMessage = await buildUserMessage(userContent, attachments);
-
-        // 4. 组装完整 messages（包含历史）
-        const fullMessages = buildFullMessages(systemMessage, userMessage, messages, 3);
-
-        setMessages((prev) => [...prev, userMessage]);
-        await historyManager.addMessage(conversationId, userMessage, 'excalidraw', llmConfig, chartType);
-
-        // 5. 调用后端流式接口
-        const response = await callLLMStream(llmConfig, fullMessages);
-
-        // 6. 处理 SSE 流（使用备用解析方式）
-        const accumulatedCode = await processSSEStreamAlt(response, (content) => {
-          setStreamingContent(content);
+        // 调用模板方法，传入 Excalidraw 特定的配置
+        // 生成的代码会通过 streamingContent 传递给编辑器
+        await handleSendMessageTemplate({
+          input,
+          attachments,
+          chartType,
+          systemPrompt: SYSTEM_PROMPT,
+          userPromptTemplate: USER_PROMPT_TEMPLATE,
+          postProcessFn: postProcessExcalidrawCode,
+          sseParserFn: parseSSEStreamAlt, // Excalidraw 使用备用解析器
+          editor: 'excalidraw',
+          showNotification,
         });
 
-        // 7. 结束流式
-        setStreamingContent('');
-
-        // 8. 后处理 JSON 文本
-        const finalJson = postProcessExcalidrawCode(accumulatedCode);
-
-        const assistantMessage = {
-          role: 'assistant',
-          content: finalJson,
-        };
-
-        setMessages((prev) => [...prev, assistantMessage]);
-        await historyManager.addMessage(conversationId, assistantMessage, 'excalidraw', llmConfig, chartType);
-
-        // 自动应用到画布
-        await handleApplyCode(finalJson);
+        // 不再自动应用到画布，由用户通过编辑器点击"应用"按钮
       } catch (error) {
-        console.error('Generate error:', error);
-        setStreamingContent('');
-
-        const errorMessage = error.message || '生成失败';
-        setLastError(errorMessage);
-
-        // Add error message to chat
-        const errorChatMessage = {
-          role: 'system',
-          content: `❌ 错误: ${errorMessage}`,
-        };
-        setMessages((prev) => [...prev, errorChatMessage]);
-
-        if (showNotification) {
-          showNotification({
-            title: '生成失败',
-            message: errorMessage,
-            type: 'error',
-          });
-        }
-      } finally {
-        setIsGenerating(false);
+        // 错误已在模板方法中处理
+        console.error('Excalidraw message send error:', error);
       }
     },
-    [
-      conversationId,
-      messages,
-      postProcessExcalidrawCode,
-      handleApplyCode,
-      buildUserMessage,
-      buildFullMessages,
-      callLLMStream,
-      processSSEStreamAlt,
-      validateConfig,
-      setIsGenerating,
-      setStreamingContent,
-      setMessages,
-    ],
+    [handleSendMessageTemplate, postProcessExcalidrawCode, parseSSEStreamAlt]
+  );
+
+  /**
+   * 针对指定的 assistant 消息执行重试：
+   * - 截断该消息及其之后的历史
+   * - 复用其前一条 user 消息重新调用 LLM
+   */
+  const handleRetryMessage = useCallback(
+    async (targetIndex, showNotification) => {
+      try {
+        await handleRetryMessageTemplate({
+          targetIndex,
+          systemPrompt: SYSTEM_PROMPT,
+          postProcessFn: postProcessExcalidrawCode,
+          sseParserFn: parseSSEStreamAlt,
+          editor: 'excalidraw',
+          showNotification,
+        });
+      } catch (error) {
+        console.error('Excalidraw message retry error:', error);
+      }
+    },
+    [handleRetryMessageTemplate, postProcessExcalidrawCode, parseSSEStreamAlt]
   );
 
   /**
    * 画布编辑回调：
    * - 将 elements 序列化为 JSON
    * - 更新 usedCode
-   * - 写入历史
-   */
+   * - 写入本地状态
+  */
   const handleCanvasChange = useCallback(
     async (elements) => {
       try {
         const code = JSON.stringify(elements);
         setUsedCode(code);
-        await historyManager.updateUsedCode(conversationId, code);
       } catch (error) {
         console.error('Canvas change error:', error);
       }
     },
-    [conversationId, setUsedCode],
+    [setUsedCode],
   );
 
   /**
@@ -266,6 +182,7 @@ export function useExcalidrawEngine() {
 
     // 操作
     handleSendMessage,
+    handleRetryMessage,
     handleApplyCode,
     handleCanvasChange,
     handleNewChat,

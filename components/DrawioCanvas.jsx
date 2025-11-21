@@ -9,6 +9,7 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
   {
     xml,
     onSave,
+    onAutosave,
     onError,
     onLoad,
     onClose,
@@ -17,7 +18,7 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
     baseUrl,
     urlParameters,
     configuration,
-    exportFormat = 'xmlsvg'
+    exportFormat = 'xml'
   },
   ref
 ) {
@@ -63,17 +64,20 @@ const DrawioCanvas = forwardRef(function DrawioCanvas(
           }
         },
         autosave: (data) => {
+          // Prefer XML provided by autosave for engine/state updates
+          if (onAutosave && data.xml) {
+            onAutosave(data.xml);
+          }
+
           if (onSave && data.xml) {
             onSave(data.xml);
           }
         },
         save: (data) => {
           // Trigger export instead of directly saving
-          action.exportDiagram({
-            format: exportFormat,
-            exit: data.exit,
-            parentEvent: 'save'
-          });
+          if (onSave && data.xml) {
+            onSave(data.xml);
+          }
         },
         exit: (data) => {
           console.log('Exit:', data.modified);

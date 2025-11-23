@@ -7,6 +7,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import OpenRouterModelSelector from '@/components/OpenRouterModelSelector.jsx';
+import { getConfig } from '@/lib/config.js';
 
 // Small helper to trigger <input type="file" multiple accept="image/*">
 function ImagePicker({ onPick, children }) {
@@ -69,6 +71,8 @@ export default function FloatingChat({
   onOpenHistory,
   onOpenSettings,
   onRetryMessage,
+  onModelChange, // 新增: 模型切换回调
+  onOpenCodeEditor, // 新增: 打开代码编辑器回调
 }) {
   const [isOpen, setIsOpen] = useState(true);
   const panelRef = useRef(null);
@@ -85,6 +89,10 @@ export default function FloatingChat({
   const bottomRef = useRef(null);
   const [shouldStickToBottom, setShouldStickToBottom] = useState(true);
   const [copiedIndex, setCopiedIndex] = useState(-1);
+
+  // 新增: OpenRouter 相关状态
+  const [currentConfig, setCurrentConfig] = useState(null);
+  const [isUsingOpenRouter, setIsUsingOpenRouter] = useState(false);
 
   // ✨ v6.0: 引擎选项
   const engineOptions = [
@@ -203,6 +211,39 @@ export default function FloatingChat({
     setImages([]);
     setFiles([]);
   }, [conversationId]);
+
+  // 新增: 检测是否使用 OpenRouter 并更新配置
+  useEffect(() => {
+    const updateConfigState = () => {
+      try {
+        const config = getConfig();
+        setCurrentConfig(config);
+
+        // 检测 baseUrl 是否包含 openrouter
+        const isOR = config?.baseUrl?.toLowerCase().includes('openrouter') || false;
+        setIsUsingOpenRouter(isOR);
+      } catch (error) {
+        console.error('Failed to get config:', error);
+        setCurrentConfig(null);
+        setIsUsingOpenRouter(false);
+      }
+    };
+
+    // 初始化时检测
+    updateConfigState();
+
+    // 监听配置变更事件
+    const handleConfigChange = () => updateConfigState();
+    window.addEventListener('config-changed', handleConfigChange);
+    window.addEventListener('password-settings-changed', handleConfigChange);
+    window.addEventListener('storage', handleConfigChange);
+
+    return () => {
+      window.removeEventListener('config-changed', handleConfigChange);
+      window.removeEventListener('password-settings-changed', handleConfigChange);
+      window.removeEventListener('storage', handleConfigChange);
+    };
+  }, []);
 
   // Close chart type menu on outside click or Escape
   useEffect(() => {
@@ -359,8 +400,8 @@ export default function FloatingChat({
     <Card ref={panelRef} className="fixed top-4 bottom-4 right-4 w-[420px] md:w-[440px] h-auto shadow-2xl flex flex-col z-50 bg-white/95 supports-[backdrop-filter]:bg-white/85 backdrop-blur-xl border border-zinc-200 rounded-[24px] overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-3 bg-white/50 border-b border-zinc-100/50">
-        {/* ✨ v6.0: 左侧 - 引擎切换下拉菜单 */}
-        <div className="relative flex items-center">
+        {/* ✨ v6.0: 左侧 - 引擎切换下拉菜单 + OpenRouter 模型选择器 */}
+        <div className="relative flex items-center gap-2">
           <button
             ref={engineMenuButtonRef}
             onClick={() => setShowEngineMenu(v => !v)}
@@ -389,8 +430,8 @@ export default function FloatingChat({
                   }}
                   className={cn(
                     'w-full text-left px-3 py-2 text-sm rounded-lg transition-colors',
-                    engineType === opt.value 
-                      ? 'bg-zinc-100 text-zinc-900 font-medium' 
+                    engineType === opt.value
+                      ? 'bg-zinc-100 text-zinc-900 font-medium'
                       : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900'
                   )}
                 >
@@ -399,10 +440,27 @@ export default function FloatingChat({
               ))}
             </div>
           )}
+
+          {/* 新增: OpenRouter 模型选择器 - 只在使用 OpenRouter 时显示 */}
+          {isUsingOpenRouter && currentConfig?.model && (
+            <OpenRouterModelSelector
+              currentModel={currentConfig.model}
+              onModelChange={onModelChange}
+            />
+          )}
         </div>
 
         {/* 右侧 - 操作按钮 */}
         <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded-lg"
+            title="代码编辑器"
+            onClick={() => onOpenCodeEditor && onOpenCodeEditor()}
+          >
+            <Code2 className="w-4 h-4" />
+          </Button>
           <Button
             variant="ghost"
             size="icon"

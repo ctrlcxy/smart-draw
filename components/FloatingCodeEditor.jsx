@@ -17,14 +17,21 @@ const getStorageKey = (engineType) => {
 /**
  * 悬浮代码编辑器组件
  * 支持 XML (Draw.io) 和 JSON (Excalidraw) 语法高亮
+ *
+ * @param {boolean} manualControl - 是否启用手动控制模式（不自动弹出）
+ * @param {boolean} isOpen - 手动控制模式下的显示状态
+ * @param {function} onClose - 手动控制模式下的关闭回调
  */
 export default function FloatingCodeEditor({
   engineType = 'drawio',
   onApplyCode,
   processCode, // 代码处理函数，用于检测/修复代码
   messages = [], // 消息历史，用于获取最新生成的代码
+  manualControl = false, // 新增：是否手动控制
+  isOpen: externalIsOpen, // 新增：外部控制的显示状态
+  onClose, // 新增：关闭回调
 }) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
   const [localCode, setLocalCode] = useState('');
   const [copied, setCopied] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
@@ -32,6 +39,12 @@ export default function FloatingCodeEditor({
   const prevCodeRef = useRef('');
   const prevMessagesLengthRef = useRef(0);
   const cacheAppliedRef = useRef(false); // 防止挂载时重复读取缓存
+
+  // 使用外部或内部控制的显示状态
+  const isOpen = manualControl ? externalIsOpen : internalIsOpen;
+  const setIsOpen = manualControl ? (value) => {
+    if (!value && onClose) onClose();
+  } : setInternalIsOpen;
 
   // 编辑器语言配置
   const language = engineType === 'excalidraw' ? 'json' : 'xml';
@@ -122,8 +135,9 @@ export default function FloatingCodeEditor({
           lastSource: 'canvas',
         });
 
-        if (!isOpen) {
-          setIsOpen(true);
+        // 只在非手动控制模式下自动打开
+        if (!manualControl && !isOpen) {
+          setInternalIsOpen(true);
         }
       } catch (error) {
         console.error('Canvas code change handler error:', error);
@@ -134,7 +148,7 @@ export default function FloatingCodeEditor({
     return () => {
       window.removeEventListener('canvas-code-changed', handleCanvasCodeChange);
     };
-  }, [engineType, isOpen, saveCache]);
+  }, [engineType, isOpen, saveCache, manualControl]);
 
   /**
    * 应用代码到画布
@@ -190,6 +204,7 @@ export default function FloatingCodeEditor({
 
   /**
    * 组件挂载时，尝试从缓存恢复代码并自动应用一次
+   * 手动控制模式下不自动打开编辑器，但仍恢复代码
    */
   useEffect(() => {
     if (cacheAppliedRef.current) return;
@@ -204,9 +219,13 @@ export default function FloatingCodeEditor({
     // 将缓存内容恢复到编辑器
     setLocalCode(cachedCode);
     prevCodeRef.current = cachedCode;
-    setIsOpen(true);
 
-    // 避免 LLM 初始消息被误判为“新消息”而再次自动应用
+    // 只在非手动控制模式下自动打开
+    if (!manualControl) {
+      setInternalIsOpen(true);
+    }
+
+    // 避免 LLM 初始消息被误判为"新消息"而再次自动应用
     prevMessagesLengthRef.current = messages.length;
 
     const applyFromCache = async () => {
@@ -278,7 +297,11 @@ export default function FloatingCodeEditor({
           // 先填入编辑器
           setLocalCode(codeContent);
           prevCodeRef.current = codeContent;
-          setIsOpen(true);
+
+          // 只在非手动控制模式下自动打开
+          if (!manualControl) {
+            setInternalIsOpen(true);
+          }
 
           // 再自动应用到画布
           handleApply(codeContent);
@@ -287,7 +310,7 @@ export default function FloatingCodeEditor({
     }
 
     prevMessagesLengthRef.current = currentMessagesLength;
-  }, [messages, extractCodeFromMessage, handleApply]);
+  }, [messages, extractCodeFromMessage, handleApply, manualControl]);
 
   /**
    * 复制代码到剪贴板

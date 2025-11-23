@@ -41,6 +41,9 @@ export default function DrawPage() {
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isCombinedSettingsOpen, setIsCombinedSettingsOpen] = useState(false);
 
+  // 代码编辑器显示状态（手动控制）
+  const [isCodeEditorOpen, setIsCodeEditorOpen] = useState(false);
+
   // 确认对话框状态
   const [confirmDialog, setConfirmDialog] = useState({
     isOpen: false,
@@ -285,6 +288,60 @@ export default function DrawPage() {
   }, [engine]);
 
   /**
+   * OpenRouter 模型切换处理
+   * 更新配置中的模型并触发配置变更事件
+   */
+  const handleModelChange = useCallback((newModel) => {
+    if (!newModel) return;
+
+    try {
+      // 获取当前配置
+      const currentConfig = configService.getCurrentConfig();
+      if (!currentConfig) {
+        showNotification('当前没有可用的配置', '请先配置 LLM', 'error');
+        return;
+      }
+
+      // 检查是否使用访问密码模式
+      const isPasswordMode = configService.isPasswordMode();
+
+      if (isPasswordMode) {
+        // 访问密码模式：更新远程配置中的模型
+        const remoteConfig = {
+          ...currentConfig,
+          model: newModel
+        };
+        configService.setRemoteConfig(remoteConfig);
+        showNotification('模型已切换', `已切换到 ${newModel}`, 'success');
+      } else {
+        // 本地配置模式：更新当前激活的本地配置
+        const activeConfigId = configService.getActiveLocalConfigId();
+        if (activeConfigId) {
+          configService.updateLocalConfig(activeConfigId, { model: newModel });
+          showNotification('模型已切换', `已切换到 ${newModel}`, 'success');
+        }
+      }
+
+      // 更新本地 config state
+      setConfig(prev => ({
+        ...prev,
+        model: newModel
+      }));
+
+    } catch (error) {
+      console.error('Failed to change model:', error);
+      showNotification('模型切换失败', error.message || '请重试', 'error');
+    }
+  }, [showNotification]);
+
+  /**
+   * 打开代码编辑器
+   */
+  const handleOpenCodeEditor = useCallback(() => {
+    setIsCodeEditorOpen(true);
+  }, []);
+
+  /**
    * 恢复历史记录处理
    * 检查引擎类型是否匹配，不匹配时询问是否切换
    */
@@ -415,14 +472,19 @@ export default function DrawPage() {
         conversationId={engine.conversationId}
         onOpenHistory={() => setIsHistoryModalOpen(true)}
         onOpenSettings={() => setIsCombinedSettingsOpen(true)}
+        onModelChange={handleModelChange}
+        onOpenCodeEditor={handleOpenCodeEditor}
       />
 
-      {/* Floating Code Editor */}
+      {/* Floating Code Editor - 手动控制显示 */}
       <FloatingCodeEditor
         engineType={engineType}
         onApplyCode={handleEditorApplyCode}
         processCode={processCode}
         messages={engine.messages}
+        manualControl={true}
+        isOpen={isCodeEditorOpen}
+        onClose={() => setIsCodeEditorOpen(false)}
       />
 
       {/* Config Manager Modal */}

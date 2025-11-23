@@ -24,7 +24,7 @@ pnpm build --webpack
 pnpm start
 
 # Run linter
-eslint
+pnpm lint
 ```
 
 The dev server runs on `http://localhost:3000`. Use `--webpack` flag when building to ensure compatibility with the project setup.
